@@ -9,9 +9,9 @@ export class GeminiClient implements GeminiModule {
   private lastRequestTime = 0;
   private minRequestInterval = 2000; // 2 seconds between requests to be safe
 
-  async initialize(apiKey: string): Promise<void> {
+  async initialize(apiKey: string, model: string = "gemini-2.5-flash"): Promise<void> {
     this.apiKey = apiKey;
-    this.model = "gemini-2.5-flash"; // Reset to default model
+    this.model = model;
     this.ready = true;
   }
 
@@ -31,6 +31,23 @@ export class GeminiClient implements GeminiModule {
       await new Promise(resolve => setTimeout(resolve, wait));
     }
     this.lastRequestTime = Date.now();
+  }
+
+  private parseJsonFromText<T>(text: string, fallback: T): T {
+    try {
+      const firstBrace = text.indexOf('{');
+      const lastBrace = text.lastIndexOf('}');
+      
+      if (firstBrace === -1 || lastBrace === -1) {
+        throw new Error("No JSON object found in response");
+      }
+      
+      const jsonStr = text.substring(firstBrace, lastBrace + 1);
+      return JSON.parse(jsonStr) as T;
+    } catch (e) {
+      console.warn("Failed to parse Gemini JSON response:", e);
+      return fallback;
+    }
   }
 
   async runBatch(files: Map<string, string>, context: GeminiContext): Promise<BatchAnalysisResult> {
@@ -77,24 +94,11 @@ export class GeminiClient implements GeminiModule {
   }
 
   private parseBatchResponse(data: any): BatchAnalysisResult {
-    try {
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      const firstBrace = text.indexOf('{');
-      const lastBrace = text.lastIndexOf('}');
-      
-      if (firstBrace === -1 || lastBrace === -1) {
-        throw new Error("No JSON object found in response");
-      }
-      
-      const jsonStr = text.substring(firstBrace, lastBrace + 1);
-      return JSON.parse(jsonStr) as BatchAnalysisResult;
-    } catch (e) {
-      console.warn("Failed to parse Gemini batch response:", e);
-      return {
-        globalSummary: "Failed to parse AI response",
-        files: []
-      };
-    }
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    return this.parseJsonFromText<BatchAnalysisResult>(text, {
+      globalSummary: "Failed to parse AI response",
+      files: []
+    });
   }
 
   async analyzeCode(code: string, context: GeminiContext): Promise<Analysis> {
@@ -167,42 +171,30 @@ export class GeminiClient implements GeminiModule {
   }
 
   private parseAnalysis(data: any): Analysis {
-    try {
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      
-      // Robust JSON extraction: find the first '{' and the last '}'
-      const firstBrace = text.indexOf('{');
-      const lastBrace = text.lastIndexOf('}');
-      
-      if (firstBrace === -1 || lastBrace === -1) {
-        throw new Error("No JSON object found in response");
-      }
-      
-      const jsonStr = text.substring(firstBrace, lastBrace + 1);
-      const parsed = JSON.parse(jsonStr);
-      
-      return {
-        issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-        risk_level: parsed.risk_level || 'low',
-        summary: parsed.summary
-      };
-    } catch (e) {
-      console.warn("Failed to parse Gemini response:", e);
-      console.warn("Raw response text:", data.candidates?.[0]?.content?.parts?.[0]?.text);
-      
-      // Fallback
-      return {
-        issues: [],
-        suggestions: ["Failed to parse AI response. Please try again."],
-        risk_level: 'low',
-        summary: "Error parsing AI response."
-      };
-    }
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const fallback: Analysis = {
+      issues: [],
+      suggestions: ["Failed to parse AI response. Please try again."],
+      risk_level: 'low',
+      summary: "Error parsing AI response."
+    };
+
+    const parsed = this.parseJsonFromText<any>(text, fallback);
+    
+    // Ensure structure even if parsed correctly but missing fields
+    return {
+      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+      risk_level: parsed.risk_level || 'low',
+      summary: parsed.summary,
+      context_analysis: parsed.context_analysis
+    };
   }
 
   async generateTests(functionCode: string): Promise<string> {
     if (!this.ready) {throw new Error("GeminiClient not initialized");}
+
+    await this.rateLimit();
 
     if (this.model === "mock") {
       return `
@@ -215,51 +207,75 @@ describe('generatedTest', () => {
 
     const prompt = PromptTemplates.testGeneration(functionCode);
     
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      }
-    );
+    try {
+      const response = await this.fetchWithRetry(
+        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+          })
+        }
+      );
 
-    const data = await response.json() as any;
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return text;
+      if (!response.ok) {
+        throw new Error(`Gemini API error: ${response.statusText}`);
+      }
+
+      const data = await response.json() as any;
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      return text;
+    } catch (error) {
+      console.error("Gemini test generation failed:", error);
+      throw error;
+    }
   }
 
   async fixError(code: string, error: string): Promise<CodeFix> {
     if (!this.ready) {throw new Error("GeminiClient not initialized");}
 
+    await this.rateLimit();
+
     if (this.model === "mock") {
       return {
         fixedCode: code + "\n// Fixed by mock",
-        confidence: 0.9
+        confidence: 0.9,
+        explanation: "Mock fix applied"
       };
     }
 
     const prompt = PromptTemplates.errorFix(code, error);
     
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }]
-        })
-      }
-    );
+    try {
+      const response = await this.fetchWithRetry(
+        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+          })
+        }
+      );
 
-    const data = await response.json() as any;
-    const fixedCode = data.candidates?.[0]?.content?.parts?.[0]?.text || code;
-    
-    return { 
-      fixedCode, 
-      confidence: 0.85 
-    };
+      if (!response.ok) {
+        throw new Error(`Gemini API error: ${response.statusText}`);
+      }
+
+      const data = await response.json() as any;
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      
+      const fallback: CodeFix = {
+        fixedCode: code,
+        confidence: 0,
+        explanation: "Failed to parse fix response"
+      };
+
+      return this.parseJsonFromText<CodeFix>(text, fallback);
+    } catch (error) {
+      console.error("Gemini error fix failed:", error);
+      throw error;
+    }
   }
 }

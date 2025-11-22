@@ -6,6 +6,10 @@ import { Connection, PublicKey } from '@solana/web3.js';
 vi.mock('@solana/web3.js', () => {
   const ConnectionMock = vi.fn();
   ConnectionMock.prototype.getBalance = vi.fn();
+  ConnectionMock.prototype.requestAirdrop = vi.fn();
+  ConnectionMock.prototype.confirmTransaction = vi.fn();
+  ConnectionMock.prototype.getSignaturesForAddress = vi.fn();
+  ConnectionMock.prototype.getParsedTransactions = vi.fn();
   
   // PublicKey needs to be a class/constructor
   const PublicKeyMock = vi.fn(function(this: any, key: string) {
@@ -68,5 +72,36 @@ describe('SolanaService', () => {
 
   it('should throw when getting balance without connection', async () => {
     await expect(service.getBalance()).rejects.toThrow('Wallet not connected');
+  });
+
+  it('should request airdrop', async () => {
+    const validKey = 'Hit3Y6p9CqX8...';
+    await service.connect(validKey);
+
+    connectionMock.requestAirdrop.mockResolvedValue('signature123');
+    connectionMock.confirmTransaction.mockResolvedValue(undefined);
+
+    const signature = await service.requestAirdrop(2);
+    expect(signature).toBe('signature123');
+    expect(connectionMock.requestAirdrop).toHaveBeenCalledWith(expect.any(Object), 2000000000);
+    expect(connectionMock.confirmTransaction).toHaveBeenCalledWith('signature123');
+  });
+
+  it('should get recent transactions', async () => {
+    const validKey = 'Hit3Y6p9CqX8...';
+    await service.connect(validKey);
+
+    connectionMock.getSignaturesForAddress.mockResolvedValue([
+      { signature: 'sig1' }, { signature: 'sig2' }
+    ]);
+    connectionMock.getParsedTransactions.mockResolvedValue([
+      { transaction: { signatures: ['sig1'] } },
+      { transaction: { signatures: ['sig2'] } }
+    ]);
+
+    const txs = await service.getRecentTransactions(2);
+    expect(txs).toHaveLength(2);
+    expect(connectionMock.getSignaturesForAddress).toHaveBeenCalled();
+    expect(connectionMock.getParsedTransactions).toHaveBeenCalledWith(['sig1', 'sig2']);
   });
 });

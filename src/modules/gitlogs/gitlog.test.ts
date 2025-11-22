@@ -7,6 +7,9 @@ import * as vscode from 'vscode';
 // The actual code uses `import { gitlogPromise } from 'gitlog'`, so we mock that named export.
 const gitlogPromiseMock = vi.fn();
 vi.mock('gitlog', () => ({
+  default: {
+    gitlogPromise: (...args: any[]) => gitlogPromiseMock(...args),
+  },
   gitlogPromise: (...args: any[]) => gitlogPromiseMock(...args),
 }));
 

@@ -3022,14 +3022,16 @@ class FileWatcher {
     watcher = null;
     disposables = [];
     lintingEndpoint;
+    outputChannel;
     constructor(lintingEndpoint = "https://your-worker.workers.dev/lint") {
         this.lintingEndpoint = lintingEndpoint;
+        this.outputChannel = vscode.window.createOutputChannel("Auto-Linter");
     }
     /**
      * Start watching files in the workspace
      */
     start() {
-        console.log("[FileWatcher] Starting file monitoring...");
+        this.outputChannel.appendLine("[FileWatcher] Starting file monitoring...");
         // Method 1: Watch specific file patterns (glob patterns)
         // This creates a watcher for TypeScript and JavaScript files
         this.watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,js,tsx,jsx}", // Watch these file types
@@ -3039,29 +3041,21 @@ class FileWatcher {
         );
         // React to file creation
         this.watcher.onDidCreate((uri) => {
-            console.log(`[FileWatcher] File created: ${uri.fsPath}`);
-            vscode.window.showInformationMessage(`📄 New file: ${uri.fsPath}`);
+            this.outputChannel.appendLine(`[FileWatcher] File created: ${uri.fsPath}`);
         });
         // React to file changes
         this.watcher.onDidChange((uri) => {
-            console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
+            // console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
         });
         // React to file deletion
         this.watcher.onDidDelete((uri) => {
-            console.log(`[FileWatcher] File deleted: ${uri.fsPath}`);
+            this.outputChannel.appendLine(`[FileWatcher] File deleted: ${uri.fsPath}`);
         });
         // Method 2: Watch for document saves (best for auto-linting)
         const saveWatcher = vscode.workspace.onDidSaveTextDocument(async (document) => {
             await this.onFileSaved(document);
         });
-        // Method 3: Watch for any text document changes (real-time)
-        const changeWatcher = vscode.workspace.onDidChangeTextDocument((event) => {
-            // Only process if there are actual content changes
-            if (event.contentChanges.length > 0) {
-                console.log(`[FileWatcher] Document modified: ${event.document.fileName}`);
-            }
-        });
-        this.disposables.push(saveWatcher, changeWatcher);
+        this.disposables.push(saveWatcher);
     }
     /**
      * Handle file save event - auto-lint the file
@@ -3073,7 +3067,7 @@ class FileWatcher {
         if (!validExtensions.includes(fileExt)) {
             return; // Skip non-code files
         }
-        console.log(`[FileWatcher] Auto-linting: ${document.fileName}`);
+        this.outputChannel.appendLine(`[FileWatcher] Auto-linting: ${document.fileName}`);
         try {
             const code = document.getText();
             // Call your Cloudflare worker to lint the code
@@ -3083,27 +3077,24 @@ class FileWatcher {
                 body: JSON.stringify({ code }),
             });
             if (!response.ok) {
-                throw new Error(`Linting failed: ${response.statusText}`);
+                throw new Error(`Linting failed: ${response.status} ${response.statusText}`);
             }
             const result = await response.json();
             // Show results to user
             if (result.warnings && result.warnings.length > 0) {
-                const message = `⚠️ ${result.warnings.length} issue(s) found in ${document.fileName}`;
+                const message = `⚠️ ${result.warnings.length} issue(s) found in ${path.basename(document.fileName)}`;
                 vscode.window.showWarningMessage(message);
-                // Optionally show detailed warnings in output channel
-                const outputChannel = vscode.window.createOutputChannel("Auto-Linter");
-                outputChannel.clear();
-                outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===\n`);
+                this.outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===`);
                 result.warnings.forEach((warning) => {
-                    outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
+                    this.outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
                 });
-                outputChannel.show();
+                this.outputChannel.show(true);
             }
             else {
-                vscode.window.showInformationMessage(`✅ No issues found in ${document.fileName}`);
+                this.outputChannel.appendLine(`✅ No issues found in ${document.fileName}`);
             }
             // If linting produced a fixed version, optionally apply it
-            if (result.linted && result.fixed !== code) {
+            if (result.linted && result.fixed && result.fixed !== code) {
                 const applyFix = await vscode.window.showInformationMessage("Apply auto-fix?", "Yes", "No");
                 if (applyFix === "Yes") {
                     await this.applyFix(document, result.fixed);
@@ -3111,8 +3102,9 @@ class FileWatcher {
             }
         }
         catch (error) {
-            console.error("[FileWatcher] Linting error:", error);
-            vscode.window.showErrorMessage(`Linting failed: ${error}`);
+            const msg = `[FileWatcher] Linting error: ${error instanceof Error ? error.message : String(error)}`;
+            console.error(msg);
+            this.outputChannel.appendLine(msg);
         }
     }
     /**
@@ -3136,10 +3128,13 @@ class FileWatcher {
         }
         this.disposables.forEach((d) => d.dispose());
         this.disposables = [];
-        console.log("[FileWatcher] Stopped file monitoring");
+        this.outputChannel.appendLine("[FileWatcher] Stopped file monitoring");
+        this.outputChannel.dispose();
     }
 }
 exports.FileWatcher = FileWatcher;
+// Helper for path.basename since we don't import path
+const path = __importStar(__webpack_require__(25));
 
 
 /***/ }),
@@ -3157,9 +3152,9 @@ class GeminiClient {
     ready = false;
     lastRequestTime = 0;
     minRequestInterval = 2000; // 2 seconds between requests to be safe
-    async initialize(apiKey) {
+    async initialize(apiKey, model = "gemini-2.5-flash") {
         this.apiKey = apiKey;
-        this.model = "gemini-2.5-flash"; // Reset to default model
+        this.model = model;
         this.ready = true;
     }
     isReady() {
@@ -3176,6 +3171,21 @@ class GeminiClient {
             await new Promise(resolve => setTimeout(resolve, wait));
         }
         this.lastRequestTime = Date.now();
+    }
+    parseJsonFromText(text, fallback) {
+        try {
+            const firstBrace = text.indexOf('{');
+            const lastBrace = text.lastIndexOf('}');
+            if (firstBrace === -1 || lastBrace === -1) {
+                throw new Error("No JSON object found in response");
+            }
+            const jsonStr = text.substring(firstBrace, lastBrace + 1);
+            return JSON.parse(jsonStr);
+        }
+        catch (e) {
+            console.warn("Failed to parse Gemini JSON response:", e);
+            return fallback;
+        }
     }
     async runBatch(files, context) {
         if (!this.ready) {
@@ -3214,23 +3224,11 @@ class GeminiClient {
         }
     }
     parseBatchResponse(data) {
-        try {
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const firstBrace = text.indexOf('{');
-            const lastBrace = text.lastIndexOf('}');
-            if (firstBrace === -1 || lastBrace === -1) {
-                throw new Error("No JSON object found in response");
-            }
-            const jsonStr = text.substring(firstBrace, lastBrace + 1);
-            return JSON.parse(jsonStr);
-        }
-        catch (e) {
-            console.warn("Failed to parse Gemini batch response:", e);
-            return {
-                globalSummary: "Failed to parse AI response",
-                files: []
-            };
-        }
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return this.parseJsonFromText(text, {
+            globalSummary: "Failed to parse AI response",
+            files: []
+        });
     }
     async analyzeCode(code, context) {
         if (!this.ready) {
@@ -3295,39 +3293,28 @@ class GeminiClient {
         throw new Error("Max retries exceeded");
     }
     parseAnalysis(data) {
-        try {
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            // Robust JSON extraction: find the first '{' and the last '}'
-            const firstBrace = text.indexOf('{');
-            const lastBrace = text.lastIndexOf('}');
-            if (firstBrace === -1 || lastBrace === -1) {
-                throw new Error("No JSON object found in response");
-            }
-            const jsonStr = text.substring(firstBrace, lastBrace + 1);
-            const parsed = JSON.parse(jsonStr);
-            return {
-                issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-                suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-                risk_level: parsed.risk_level || 'low',
-                summary: parsed.summary
-            };
-        }
-        catch (e) {
-            console.warn("Failed to parse Gemini response:", e);
-            console.warn("Raw response text:", data.candidates?.[0]?.content?.parts?.[0]?.text);
-            // Fallback
-            return {
-                issues: [],
-                suggestions: ["Failed to parse AI response. Please try again."],
-                risk_level: 'low',
-                summary: "Error parsing AI response."
-            };
-        }
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const fallback = {
+            issues: [],
+            suggestions: ["Failed to parse AI response. Please try again."],
+            risk_level: 'low',
+            summary: "Error parsing AI response."
+        };
+        const parsed = this.parseJsonFromText(text, fallback);
+        // Ensure structure even if parsed correctly but missing fields
+        return {
+            issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+            suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+            risk_level: parsed.risk_level || 'low',
+            summary: parsed.summary,
+            context_analysis: parsed.context_analysis
+        };
     }
     async generateTests(functionCode) {
         if (!this.ready) {
             throw new Error("GeminiClient not initialized");
         }
+        await this.rateLimit();
         if (this.model === "mock") {
             return `
 describe('generatedTest', () => {
@@ -3337,41 +3324,63 @@ describe('generatedTest', () => {
 });`;
         }
         const prompt = prompts_1.PromptTemplates.testGeneration(functionCode);
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        });
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        return text;
+        try {
+            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            return text;
+        }
+        catch (error) {
+            console.error("Gemini test generation failed:", error);
+            throw error;
+        }
     }
     async fixError(code, error) {
         if (!this.ready) {
             throw new Error("GeminiClient not initialized");
         }
+        await this.rateLimit();
         if (this.model === "mock") {
             return {
                 fixedCode: code + "\n// Fixed by mock",
-                confidence: 0.9
+                confidence: 0.9,
+                explanation: "Mock fix applied"
             };
         }
         const prompt = prompts_1.PromptTemplates.errorFix(code, error);
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        });
-        const data = await response.json();
-        const fixedCode = data.candidates?.[0]?.content?.parts?.[0]?.text || code;
-        return {
-            fixedCode,
-            confidence: 0.85
-        };
+        try {
+            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const fallback = {
+                fixedCode: code,
+                confidence: 0,
+                explanation: "Failed to parse fix response"
+            };
+            return this.parseJsonFromText(text, fallback);
+        }
+        catch (error) {
+            console.error("Gemini error fix failed:", error);
+            throw error;
+        }
     }
 }
 exports.GeminiClient = GeminiClient;
@@ -3499,7 +3508,7 @@ Respond in valid JSON format ONLY with this structure:
     }
     static errorFix(code, error) {
         return `
-Fix the following error in the code. Return ONLY the fixed code block without markdown formatting if possible, or inside a single code block.
+Fix the following error in the code.
 
 Error:
 ${error}
@@ -3508,6 +3517,15 @@ Code:
 \`\`\`
 ${code}
 \`\`\`
+
+INSTRUCTIONS:
+Analyze the error and the code. Provide a corrected version of the code.
+Respond in valid JSON format ONLY:
+{
+  "fixedCode": "string (the complete fixed code)",
+  "confidence": number (0.0 to 1.0),
+  "explanation": "string (brief explanation of the fix)"
+}
     `.trim();
     }
 }

@@ -4,18 +4,20 @@ export class FileWatcher {
   private watcher: vscode.FileSystemWatcher | null = null;
   private disposables: vscode.Disposable[] = [];
   private lintingEndpoint: string;
+  private outputChannel: vscode.OutputChannel;
 
   constructor(
     lintingEndpoint: string = "https://your-worker.workers.dev/lint"
   ) {
     this.lintingEndpoint = lintingEndpoint;
+    this.outputChannel = vscode.window.createOutputChannel("Auto-Linter");
   }
 
   /**
    * Start watching files in the workspace
    */
   public start(): void {
-    console.log("[FileWatcher] Starting file monitoring...");
+    this.outputChannel.appendLine("[FileWatcher] Starting file monitoring...");
 
     // Method 1: Watch specific file patterns (glob patterns)
     // This creates a watcher for TypeScript and JavaScript files
@@ -28,18 +30,17 @@ export class FileWatcher {
 
     // React to file creation
     this.watcher.onDidCreate((uri) => {
-      console.log(`[FileWatcher] File created: ${uri.fsPath}`);
-      vscode.window.showInformationMessage(`📄 New file: ${uri.fsPath}`);
+      this.outputChannel.appendLine(`[FileWatcher] File created: ${uri.fsPath}`);
     });
 
     // React to file changes
     this.watcher.onDidChange((uri) => {
-      console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
+      // console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
     });
 
     // React to file deletion
     this.watcher.onDidDelete((uri) => {
-      console.log(`[FileWatcher] File deleted: ${uri.fsPath}`);
+      this.outputChannel.appendLine(`[FileWatcher] File deleted: ${uri.fsPath}`);
     });
 
     // Method 2: Watch for document saves (best for auto-linting)
@@ -49,17 +50,7 @@ export class FileWatcher {
       }
     );
 
-    // Method 3: Watch for any text document changes (real-time)
-    const changeWatcher = vscode.workspace.onDidChangeTextDocument((event) => {
-      // Only process if there are actual content changes
-      if (event.contentChanges.length > 0) {
-        console.log(
-          `[FileWatcher] Document modified: ${event.document.fileName}`
-        );
-      }
-    });
-
-    this.disposables.push(saveWatcher, changeWatcher);
+    this.disposables.push(saveWatcher);
   }
 
   /**
@@ -76,7 +67,7 @@ export class FileWatcher {
       return; // Skip non-code files
     }
 
-    console.log(`[FileWatcher] Auto-linting: ${document.fileName}`);
+    this.outputChannel.appendLine(`[FileWatcher] Auto-linting: ${document.fileName}`);
 
     try {
       const code = document.getText();
@@ -89,34 +80,27 @@ export class FileWatcher {
       });
 
       if (!response.ok) {
-        throw new Error(`Linting failed: ${response.statusText}`);
+        throw new Error(`Linting failed: ${response.status} ${response.statusText}`);
       }
 
       const result: any = await response.json();
 
       // Show results to user
       if (result.warnings && result.warnings.length > 0) {
-        const message = `⚠️ ${result.warnings.length} issue(s) found in ${document.fileName}`;
+        const message = `⚠️ ${result.warnings.length} issue(s) found in ${path.basename(document.fileName)}`;
         vscode.window.showWarningMessage(message);
 
-        // Optionally show detailed warnings in output channel
-        const outputChannel = vscode.window.createOutputChannel("Auto-Linter");
-        outputChannel.clear();
-        outputChannel.appendLine(
-          `=== Linting Results for ${document.fileName} ===\n`
-        );
+        this.outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===`);
         result.warnings.forEach((warning: any) => {
-          outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
+          this.outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
         });
-        outputChannel.show();
+        this.outputChannel.show(true);
       } else {
-        vscode.window.showInformationMessage(
-          `✅ No issues found in ${document.fileName}`
-        );
+        this.outputChannel.appendLine(`✅ No issues found in ${document.fileName}`);
       }
 
       // If linting produced a fixed version, optionally apply it
-      if (result.linted && result.fixed !== code) {
+      if (result.linted && result.fixed && result.fixed !== code) {
         const applyFix = await vscode.window.showInformationMessage(
           "Apply auto-fix?",
           "Yes",
@@ -128,8 +112,9 @@ export class FileWatcher {
         }
       }
     } catch (error) {
-      console.error("[FileWatcher] Linting error:", error);
-      vscode.window.showErrorMessage(`Linting failed: ${error}`);
+      const msg = `[FileWatcher] Linting error: ${error instanceof Error ? error.message : String(error)}`;
+      console.error(msg);
+      this.outputChannel.appendLine(msg);
     }
   }
 
@@ -161,6 +146,11 @@ export class FileWatcher {
     }
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
-    console.log("[FileWatcher] Stopped file monitoring");
+    this.outputChannel.appendLine("[FileWatcher] Stopped file monitoring");
+    this.outputChannel.dispose();
   }
 }
+
+// Helper for path.basename since we don't import path
+import * as path from 'path';
+

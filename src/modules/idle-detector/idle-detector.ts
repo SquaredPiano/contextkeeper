@@ -5,10 +5,22 @@ export class IdleDetector extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private thresholdMs: number;
   private disposables: vscode.Disposable[] = [];
+  private _isIdle: boolean = false;
 
   constructor(thresholdMs: number = 60000) { // Default 1 minute
     super();
     this.thresholdMs = thresholdMs;
+  }
+
+  public get isIdle(): boolean {
+    return this._isIdle;
+  }
+
+  public setThreshold(ms: number): void {
+    this.thresholdMs = ms;
+    if (!this._isIdle) {
+      this.resetTimer();
+    }
   }
 
   public start(): void {
@@ -27,6 +39,7 @@ export class IdleDetector extends EventEmitter {
     }
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
+    this._isIdle = false;
     console.log('[IdleDetector] Stopped monitoring');
   }
 
@@ -35,12 +48,18 @@ export class IdleDetector extends EventEmitter {
       clearTimeout(this.timer);
     }
     
-    // Emit activity event if needed, but mainly we care about idle
-    this.emit('activity');
+    if (this._isIdle) {
+      this._isIdle = false;
+      console.log('[IdleDetector] User is active again');
+      this.emit('active');
+    }
 
     this.timer = setTimeout(() => {
-      console.log('[IdleDetector] User is idle');
-      this.emit('idle');
+      if (!this._isIdle) {
+        this._isIdle = true;
+        console.log('[IdleDetector] User is idle');
+        this.emit('idle');
+      }
     }, this.thresholdMs);
   }
 }

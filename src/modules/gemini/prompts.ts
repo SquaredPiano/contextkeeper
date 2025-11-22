@@ -122,7 +122,7 @@ Respond in valid JSON format ONLY with this structure:
   
   static errorFix(code: string, error: string): string {
     return `
-Fix the following error in the code. Return ONLY the fixed code block without markdown formatting if possible, or inside a single code block.
+Fix the following error in the code.
 
 Error:
 ${error}
@@ -131,6 +131,15 @@ Code:
 \`\`\`
 ${code}
 \`\`\`
+
+INSTRUCTIONS:
+Analyze the error and the code. Provide a corrected version of the code.
+Respond in valid JSON format ONLY:
+{
+  "fixedCode": "string (the complete fixed code)",
+  "confidence": number (0.0 to 1.0),
+  "explanation": "string (brief explanation of the fix)"
+}
     `.trim();
   }
 }

@@ -17,9 +17,13 @@ export class ElevenLabsService implements ElevenLabsModule {
     reject: (err: any) => void;
   }> = [];
   private isProcessing: boolean = false;
+  private playerCommand: string | null = null;
 
   async initialize(apiKey: string): Promise<void> {
     this.apiKey = apiKey || null;
+    
+    // Check for audio player availability
+    await this.checkPlayerAvailability();
 
     if (!this.apiKey) {
       // No API key -> fallback immediately
@@ -38,6 +42,32 @@ export class ElevenLabsService implements ElevenLabsModule {
 
   isReady(): boolean {
     return !this.fallbackMode && !!this.apiKey;
+  }
+
+  clearQueue(): void {
+    this.queue = [];
+  }
+
+  private async checkPlayerAvailability(): Promise<void> {
+    const platform = process.platform;
+    if (platform === 'darwin') {
+      this.playerCommand = 'afplay';
+    } else if (platform === 'linux') {
+      // Check if mpg123 is available
+      try {
+        await new Promise((resolve, reject) => {
+          const child = spawn('which', ['mpg123']);
+          child.on('close', (code) => code === 0 ? resolve(true) : reject());
+          child.on('error', reject);
+        });
+        this.playerCommand = 'mpg123';
+      } catch {
+        console.warn('mpg123 not found, audio playback will be disabled on Linux');
+        this.playerCommand = null;
+      }
+    } else if (platform === 'win32') {
+      this.playerCommand = 'powershell.exe';
+    }
   }
 
   async speak(text: string, voice: VoiceType = 'casual'): Promise<void> {
@@ -111,58 +141,61 @@ export class ElevenLabsService implements ElevenLabsModule {
   }
 
   private async playAudio(data: ArrayBuffer): Promise<void> {
+    if (!this.playerCommand) {
+      console.log('[Audio] No audio player available, skipping playback.');
+      return;
+    }
+
     // Write to temporary file and play using platform-native tool
     const buffer = Buffer.from(data);
     const tmpDir = os.tmpdir();
     const fileName = `elevenlabs_${Date.now()}.mp3`;
     const filePath = path.join(tmpDir, fileName);
 
-    await fs.writeFile(filePath, buffer);
+    try {
+      await fs.writeFile(filePath, buffer);
+      console.log(`[Audio] Playing ${fileName}...`);
 
-    console.log(`[Audio] Playing ${fileName}...`);
+      const platform = process.platform;
+      let args: string[] = [];
 
-    const platform = process.platform;
-    let cmd: string;
-    let args: string[] = [];
-
-    if (platform === 'darwin') {
-      cmd = 'afplay';
-      args = [filePath];
-    } else if (platform === 'linux') {
-      // Requirement asks for `aplay`, but aplay typically only supports WAV.
-      // ElevenLabs returns MP3. `mpg123` is standard for CLI MP3 playback.
-      // If `aplay` is strictly required, we would need to convert or request PCM.
-      // Falling back to `mpg123` for MP3 support.
-      cmd = 'mpg123';
-      args = ['-q', filePath];
-    } else if (platform === 'win32') {
-      // Use Powershell to play sync
-      cmd = 'powershell.exe';
-      args = ['-c', `Add-Type -AssemblyName presentationCore;` +
-        `[System.Windows.Media.MediaPlayer]$player = New-Object System.Windows.Media.MediaPlayer;` +
-        `$player.Open([System.Uri]::new('${filePath}'));` +
-        `$player.Play();` +
-        `Start-Sleep -s 2`];
-    } else {
-      // Unknown platform: fallback to console
-      console.log(`[AUDIO] saved to ${filePath}`);
-      return;
-    }
-
-    await new Promise<void>((resolve) => {
-      try {
-        const child = spawn(cmd, args, { stdio: 'ignore', detached: false });
-        child.on('error', () => resolve());
-        // Some players exit quickly; wait a short period before cleaning up
-        child.on('close', () => resolve());
-        // Fallback timeout
-        setTimeout(() => resolve(), 8000);
-      } catch (e) {
-        resolve();
+      if (platform === 'darwin') {
+        args = [filePath];
+      } else if (platform === 'linux') {
+        args = ['-q', filePath];
+      } else if (platform === 'win32') {
+        args = ['-c', `Add-Type -AssemblyName presentationCore;` +
+          `[System.Windows.Media.MediaPlayer]$player = New-Object System.Windows.Media.MediaPlayer;` +
+          `$player.Open([System.Uri]::new('${filePath}'));` +
+          `$player.Play();` +
+          `Start-Sleep -s 2`];
       }
-    });
 
-    // Attempt to remove file, but don't block on errors
-    fs.unlink(filePath).catch(() => { /* ignore */ });
+      await new Promise<void>((resolve) => {
+        const child = spawn(this.playerCommand!, args, { stdio: 'ignore', detached: false });
+        
+        const timeout = setTimeout(() => {
+          try { child.kill(); } catch {}
+          resolve();
+        }, 10000); // 10s timeout
+
+        child.on('error', (err) => {
+          console.error(`[Audio] Player error: ${err.message}`);
+          clearTimeout(timeout);
+          resolve();
+        });
+
+        child.on('close', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
+
+    } catch (error) {
+      console.error('[Audio] Playback failed:', error);
+    } finally {
+      // Attempt to remove file
+      fs.unlink(filePath).catch(() => { /* ignore */ });
+    }
   }
 }
