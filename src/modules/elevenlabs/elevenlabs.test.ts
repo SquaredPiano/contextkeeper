@@ -1,20 +1,35 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ElevenLabsService } from './elevenlabs';
-import { spawn } from 'child_process';
+import { AudioPlayer } from './audio-player';
 
 // Mock fetch globally
 const fetchMock = vi.fn();
 global.fetch = fetchMock;
 
-// Mock child_process spawn
-vi.mock('child_process', () => ({
-  spawn: vi.fn()
-}));
+// Create the mock methods
+const playMock = vi.fn();
+const checkAvailabilityMock = vi.fn();
+
+// Mock AudioPlayer
+vi.mock('./audio-player', () => {
+  return {
+    AudioPlayer: class {
+      play = playMock;
+      checkAvailability = checkAvailabilityMock;
+    }
+  };
+});
 
 describe('ElevenLabsService', () => {
   let service: ElevenLabsService;
 
   beforeEach(() => {
+    vi.clearAllMocks();
+    
+    // Reset default implementations
+    playMock.mockResolvedValue(undefined);
+    checkAvailabilityMock.mockResolvedValue(true);
+
     service = new ElevenLabsService();
     fetchMock.mockReset();
     // Mock successful API response by default
@@ -22,16 +37,6 @@ describe('ElevenLabsService', () => {
       ok: true,
       arrayBuffer: async () => new ArrayBuffer(10),
     });
-    
-    // Mock spawn for checkPlayerAvailability (linux check)
-    (spawn as any).mockReturnValue({
-      on: (event: string, cb: any) => {
-        if (event === 'close') cb(0); // success
-      }
-    });
-
-    // Mock playAudio to avoid actual file I/O and playback
-    vi.spyOn(service as any, 'playAudio').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -40,7 +45,7 @@ describe('ElevenLabsService', () => {
 
   it('should initialize with valid API key', async () => {
     await service.initialize('test-key');
-    expect(service.isReady()).toBe(true);
+    expect(service.isReady).toBe(true);
   });
 
   it('should fall back to console on API failure', async () => {
@@ -57,10 +62,8 @@ describe('ElevenLabsService', () => {
   it('should queue messages and play them sequentially', async () => {
     await service.initialize('test-key');
     
-    const playAudioSpy = vi.spyOn(service as any, 'playAudio');
-    
     // Simulate slow playback
-    playAudioSpy.mockImplementation(async () => {
+    playMock.mockImplementation(async () => {
       await new Promise(resolve => setTimeout(resolve, 50));
     });
 
@@ -70,8 +73,8 @@ describe('ElevenLabsService', () => {
 
     await Promise.all([p1, p2, p3]);
 
-    // The initialize call also calls speak('Test'), so total calls = 1 (init) + 3 (messages) = 4
-    expect(playAudioSpy).toHaveBeenCalledTimes(4);
+    // The initialize call no longer calls speak('Test'), so total calls = 3 (messages)
+    expect(playMock).toHaveBeenCalledTimes(3);
   });
 
   it('should handle API errors gracefully without crashing queue', async () => {

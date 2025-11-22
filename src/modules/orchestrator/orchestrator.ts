@@ -5,6 +5,7 @@ import { CloudflareClient, CloudflareLintResult } from "../cloudflare/client";
 import { GeminiClient } from "../gemini/gemini-client";
 import { ContextBuilder } from "../gemini/context-builder";
 import { GeminiContext, Analysis, BatchAnalysisResult } from "../gemini/types";
+import { LanceDBStorage } from "../../services/storage/storage";
 import { EventEmitter } from "events";
 import { exec } from "child_process";
 import { promisify } from "util";
@@ -87,6 +88,7 @@ export interface OrchestratorConfig {
 export class Orchestrator extends EventEmitter {
   private cloudflareClient: CloudflareClient;
   private geminiClient: GeminiClient;
+  private storage: LanceDBStorage;
   private config: OrchestratorConfig;
 
   // Tracks user editing history for context reconstruction
@@ -99,6 +101,7 @@ export class Orchestrator extends EventEmitter {
     this.config = config;
     this.cloudflareClient = new CloudflareClient(config.cloudflareWorkerUrl);
     this.geminiClient = new GeminiClient();
+    this.storage = new LanceDBStorage();
   }
 
   /**
@@ -107,6 +110,12 @@ export class Orchestrator extends EventEmitter {
   async initialize(): Promise<void> {
     if (this.config.geminiApiKey) await this.geminiClient.initialize(this.config.geminiApiKey);
     else this.geminiClient.enableMockMode();
+
+    try {
+      await this.storage.connect();
+    } catch (e) {
+      console.warn("Failed to connect to LanceDB:", e);
+    }
 
     this.emit("initialized");
   }
@@ -386,7 +395,7 @@ export class Orchestrator extends EventEmitter {
     /** PREP CONTEXT FOR GEMINI **/
     const rawLogInput = await this.buildRawLogInput(file, context, lintResult);
 
-    const gemContext: GeminiContext = ContextBuilder.build(rawLogInput);
+    const gemContext: GeminiContext = await ContextBuilder.build(rawLogInput, this.storage);
 
     // Try Gemini analysis (only if ready)
     try {
@@ -548,7 +557,7 @@ export class Orchestrator extends EventEmitter {
       dependencies,
     };
 
-    return ContextBuilder.build(rawLogInput);
+    return await ContextBuilder.build(rawLogInput, this.storage);
   }
 
   /**

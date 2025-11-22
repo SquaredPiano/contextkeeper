@@ -91,6 +91,16 @@ Key responsibilities:
 The service uses an EventEmitter pattern to notify subscribers when new context is collected, making it easy to integrate with UI components that need real-time updates.`;
 	}
 
+	async summarize(text: string): Promise<string> {
+		await this.delay(800);
+		return `You were last working on ${text.split('\n')[0] || 'a file'}. You made several edits and commits.`;
+	}
+
+	async plan(goal: string, context: DeveloperContext): Promise<string> {
+		await this.delay(500);
+		return `Mock Plan: Run auto-lint to fix issues in ${context.files.activeFile || 'the active file'}.`;
+	}
+
 	getIssuesByFile(): any[] {
 		if (!this.currentAnalysis) {
 			return [];

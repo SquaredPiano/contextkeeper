@@ -7,6 +7,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { dashboardHtml } from './webview/dashboard';
 import {
 	DeveloperContext,
 	AIAnalysis,
@@ -102,20 +103,6 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
 	}
 
 	private getHtmlContent(webview: vscode.Webview): string {
-		// Load HTML from file
-		const htmlPath = path.join(
-			this.extensionUri.fsPath,
-			'src',
-			'ui',
-			'webview',
-			'dashboard.html'
-		);
-
-		let html = fs.readFileSync(htmlPath, 'utf8');
-
-		// Could inject nonce for security, add resource URIs, etc.
-		// For now, return as-is since we're using inline scripts/styles
-		
-		return html;
+		return dashboardHtml;
 	}
 }

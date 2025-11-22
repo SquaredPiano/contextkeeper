@@ -5,7 +5,7 @@ describe('ElevenLabsService', () => {
   it('should initialize with valid API key', async () => {
     const service = new ElevenLabsService();
     await service.initialize('test-key');
-    expect(service.isReady()).toBe(true);
+    expect(service.isReady).toBe(true);
   });
 
   it('should fall back to console on API failure', async () => {

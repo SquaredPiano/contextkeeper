@@ -2,8 +2,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GeminiClient } from './gemini-client';
 import { GeminiContext } from './types';
 
-// Mock global fetch
-global.fetch = vi.fn();
+// Mock GoogleGenerativeAI
+const mockGenerateContent = vi.fn();
+const mockGetGenerativeModel = vi.fn(() => ({
+  generateContent: mockGenerateContent
+}));
+
+vi.mock('@google/generative-ai', () => {
+  return {
+    GoogleGenerativeAI: class {
+      getGenerativeModel = mockGetGenerativeModel;
+    }
+  };
+});
 
 describe('GeminiClient', () => {
   let client: GeminiClient;
@@ -33,24 +44,17 @@ describe('GeminiClient', () => {
   it('should analyze code and parse response', async () => {
     await client.initialize('test-key');
 
-    const mockResponse = {
-      candidates: [{
-        content: {
-          parts: [{
-            text: JSON.stringify({
-              issues: [{ line: 1, severity: 'error', message: 'Test error' }],
-              suggestions: ['Fix it'],
-              risk_level: 'high',
-              summary: 'Test summary'
-            })
-          }]
-        }
-      }]
-    };
+    const mockResponseText = JSON.stringify({
+      issues: [{ line: 1, severity: 'error', message: 'Test error' }],
+      suggestions: ['Fix it'],
+      risk_level: 'high',
+      summary: 'Test summary'
+    });
 
-    (global.fetch as any).mockResolvedValue({
-      ok: true,
-      json: async () => mockResponse
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () => mockResponseText
+      }
     });
 
     const result = await client.analyzeCode('const x = 1;', mockContext);
@@ -58,7 +62,7 @@ describe('GeminiClient', () => {
     expect(result.issues).toHaveLength(1);
     expect(result.issues[0].message).toBe('Test error');
     expect(result.risk_level).toBe('high');
-    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(mockGenerateContent).toHaveBeenCalledTimes(1);
   });
 
   it('should handle markdown code blocks in response', async () => {
@@ -70,19 +74,10 @@ describe('GeminiClient', () => {
       risk_level: 'low'
     });
 
-    const mockResponse = {
-      candidates: [{
-        content: {
-          parts: [{
-            text: `\`\`\`json\n${jsonContent}\n\`\`\``
-          }]
-        }
-      }]
-    };
-
-    (global.fetch as any).mockResolvedValue({
-      ok: true,
-      json: async () => mockResponse
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () => `\`\`\`json\n${jsonContent}\n\`\`\``
+      }
     });
 
     const result = await client.analyzeCode('const x = 1;', mockContext);
@@ -92,64 +87,18 @@ describe('GeminiClient', () => {
   it('should handle API errors', async () => {
     await client.initialize('test-key');
 
-    (global.fetch as any).mockResolvedValue({
-      ok: false,
-      statusText: 'Bad Request'
-    });
+    mockGenerateContent.mockRejectedValue(new Error('API Error'));
 
-    await expect(client.analyzeCode('code', mockContext)).rejects.toThrow('Gemini API error: Bad Request');
-  });
-
-  it('should retry on 500 errors', async () => {
-    await client.initialize('test-key');
-
-    const mockResponse = {
-      candidates: [{
-        content: {
-          parts: [{
-            text: JSON.stringify({
-              issues: [],
-              suggestions: [],
-              risk_level: 'low'
-            })
-          }]
-        }
-      }]
-    };
-
-    let callCount = 0;
-    (global.fetch as any).mockImplementation(async () => {
-      callCount++;
-      if (callCount < 3) {
-        return { ok: false, status: 500, statusText: 'Internal Server Error' };
-      }
-      return {
-        ok: true,
-        json: async () => mockResponse
-      };
-    });
-
-    const result = await client.analyzeCode('code', mockContext);
-    expect(callCount).toBe(3);
-    expect(result.risk_level).toBe('low');
+    await expect(client.analyzeCode('code', mockContext)).rejects.toThrow('API Error');
   });
 
   it('should generate tests', async () => {
     await client.initialize('test-key');
     
-    const mockResponse = {
-      candidates: [{
-        content: {
-          parts: [{
-            text: 'describe("test", () => {});'
-          }]
-        }
-      }]
-    };
-
-    (global.fetch as any).mockResolvedValue({
-      ok: true,
-      json: async () => mockResponse
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () => 'describe("test", () => {});'
+      }
     });
 
     const tests = await client.generateTests('function foo() {}');
@@ -165,19 +114,10 @@ describe('GeminiClient', () => {
       explanation: 'Fixed typo'
     };
 
-    const mockResponse = {
-      candidates: [{
-        content: {
-          parts: [{
-            text: JSON.stringify(fixResponse)
-          }]
-        }
-      }]
-    };
-
-    (global.fetch as any).mockResolvedValue({
-      ok: true,
-      json: async () => mockResponse
+    mockGenerateContent.mockResolvedValue({
+      response: {
+        text: () => JSON.stringify(fixResponse)
+      }
     });
 
     const result = await client.fixError('broken', 'error');

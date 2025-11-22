@@ -1,7 +1,8 @@
 import { GeminiContext, RawLogInput } from './types';
+import { IStorageService } from '../../services/interfaces';
 
 export class ContextBuilder {
-  static build(raw: RawLogInput): GeminiContext {
+  static async build(raw: RawLogInput, storage?: IStorageService): Promise<GeminiContext> {
     const {
       gitLogs = [],
       gitDiff = "",
@@ -31,6 +32,22 @@ export class ContextBuilder {
     }
     // Add other open files if small enough? For now just active.
 
+    // 4. Fetch relevant past sessions from Vector DB
+    let relevantPastSessions: Array<{ summary: string; timestamp: number }> = [];
+    if (storage && (activeFile || gitDiff)) {
+      try {
+        // Query based on active file or diff
+        const query = activeFile ? `Working on ${activeFile}` : gitDiff.substring(0, 100);
+        const sessions = await storage.getSimilarSessions(query, 3);
+        relevantPastSessions = sessions.map(s => ({
+          summary: s.summary,
+          timestamp: s.timestamp
+        }));
+      } catch (e) {
+        console.warn("Failed to fetch similar sessions:", e);
+      }
+    }
+
     return {
       activeFile: activeFile || null,
       recentCommits: gitLogs.slice(0, 10), // Increased context
@@ -40,7 +57,8 @@ export class ContextBuilder {
       relatedFiles: relatedFiles,
       openFileContents: openFileContents,
       projectStructure,
-      dependencies
+      dependencies,
+      relevantPastSessions
     };
   }
 }

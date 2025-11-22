@@ -1,14 +1,9 @@
 // cloudflare/client.ts
 // VSCode-side API wrapper to call the Cloudflare worker
 
-export type CloudflareLintResult = {
-    fixed: string;
-    language: string;
-    linted: boolean;
-    severity: "none" | "low" | "medium" | "high";
-    warnings: { message: string; severity: string }[];
-  };
-  
+import { CloudflareLintResult } from "./types";
+export { CloudflareLintResult };
+
 export class CloudflareClient {
   private url: string;
   private timeoutMs: number;

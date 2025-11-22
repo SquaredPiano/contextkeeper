@@ -1,90 +1,86 @@
 import { IAIService, DeveloperContext, AIAnalysis, CodeFix } from '../interfaces';
-import { GeminiClient } from '../../modules/gemini/gemini-client';
-import { ContextBuilder } from '../../modules/gemini/context-builder';
-import { BatchAnalysisResult } from '../../modules/gemini/types';
+import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 import { EventEmitter } from 'events';
-import * as vscode from 'vscode';
 
 export class GeminiService extends EventEmitter implements IAIService {
-  private client: GeminiClient;
+  private genAI: GoogleGenerativeAI | undefined;
+  private model: GenerativeModel | undefined;
+  private embeddingModel: GenerativeModel | undefined;
   private isInitialized: boolean = false;
-  private batchCache: Map<string, BatchAnalysisResult> = new Map();
 
   constructor() {
     super();
-    this.client = new GeminiClient();
   }
 
   async initialize(apiKey: string): Promise<void> {
-    await this.client.initialize(apiKey);
-    this.isInitialized = true;
+    if (!apiKey) {
+      console.warn("GeminiService: No API key provided.");
+      return;
+    }
+    try {
+      this.genAI = new GoogleGenerativeAI(apiKey);
+      this.model = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+      this.embeddingModel = this.genAI.getGenerativeModel({ model: "text-embedding-004" });
+      this.isInitialized = true;
+      console.log("GeminiService initialized successfully.");
+    } catch (error) {
+      console.error("Failed to initialize GeminiService:", error);
+    }
   }
 
-  /**
-   * Runs a batch analysis on the active file and potentially related files.
-   * This leverages the large context window to get analysis, tests, and fixes in one go.
-   */
   async analyze(code: string, context: DeveloperContext): Promise<AIAnalysis> {
-    if (!this.isInitialized) {
-      const error = new Error("GeminiService not initialized. Please check your API key settings.");
-      this.emit('error', error);
-      throw error;
+    if (!this.isInitialized || !this.model) {
+      throw new Error("GeminiService not initialized");
     }
 
     this.emit('analysisStarted');
 
     try {
-      const geminiContext = ContextBuilder.build({
-        gitLogs: context.git.recentCommits.map(c => `${c.hash.substring(0,7)} - ${c.message}`),
-        gitDiff: "", 
-        openFiles: context.files.openFiles,
-        activeFile: context.files.activeFile,
-        errors: [],
-        editHistory: context.files.recentlyEdited.map(e => ({ 
-          file: e.file, 
-          timestamp: e.timestamp.getTime() 
-        }))
-      });
+      const prompt = `
+        Analyze the following code snippet and provided developer context.
+        Identify potential issues, bugs, or improvements.
+        
+        Context:
+        - Active File: ${context.files.activeFile}
+        - Recent Commits: ${context.git.recentCommits.map(c => c.message).join(', ')}
+        
+        Code:
+        \`\`\`
+        ${code}
+        \`\`\`
+        
+        Return the response as a JSON object with the following structure:
+        {
+          "issues": [{ "line": number, "message": "string", "severity": "error" | "warning" }],
+          "suggestions": ["string"],
+          "riskLevel": "low" | "medium" | "high",
+          "confidence": number
+        }
+      `;
 
-      // Prepare batch payload
-      const filesToAnalyze = new Map<string, string>();
-      filesToAnalyze.set(context.files.activeFile, code);
-      
-      // In a real scenario, we would read related files here and add them to the map
-      // For now, we focus on the active file but use the batch endpoint structure
+      const result = await this.model.generateContent(prompt);
+      const response = result.response;
+      const text = response.text();
 
-      this.emit('analysisProgress', 20, 'Sending batch context to Gemini...');
-      
-      // Use runBatch instead of analyzeCode
-      const batchResult = await this.client.runBatch(filesToAnalyze, geminiContext);
-      
-      // Cache the result for future use (e.g. generateTests calls)
-      this.batchCache.set(context.files.activeFile, batchResult);
-
-      this.emit('analysisProgress', 80, 'Processing batch results...');
-
-      // Extract analysis for the active file
-      const fileResult = batchResult.files.find(f => f.file === context.files.activeFile) || batchResult.files[0];
-      
-      if (!fileResult) {
-        throw new Error("No analysis result found for active file");
-      }
+      // Clean up markdown code blocks if present
+      const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
+      const analysisData = JSON.parse(jsonString);
 
       const analysis: AIAnalysis = {
-        issues: fileResult.analysis.issues.map((i, idx) => ({
-          id: `issue-${idx}`,
+        issues: analysisData.issues.map((i: any, idx: number) => ({
+          id: `issue-${Date.now()}-${idx}`,
           file: context.files.activeFile,
           line: i.line,
           column: 0,
-          severity: (i.severity as 'error' | 'warning' | 'info') || 'warning',
+          severity: i.severity,
           message: i.message
         })),
-        suggestions: fileResult.analysis.suggestions.map(s => ({
+        suggestions: analysisData.suggestions.map((s: string) => ({
           type: 'refactor',
           message: s
         })),
-        riskLevel: (fileResult.analysis.risk_level as 'low' | 'medium' | 'high') || 'low',
-        confidence: 0.9,
+        riskLevel: analysisData.riskLevel,
+        confidence: analysisData.confidence,
         timestamp: new Date()
       };
 
@@ -92,46 +88,87 @@ export class GeminiService extends EventEmitter implements IAIService {
       return analysis;
 
     } catch (error: any) {
-      console.error("GeminiService Analysis Error:", error);
+      console.error("Gemini Analysis Error:", error);
       this.emit('error', error);
       throw error;
     }
   }
 
   async generateTests(code: string): Promise<string> {
-    if (!this.isInitialized) {throw new Error("GeminiService not initialized");}
-    
-    // Check cache first
-    // Note: In a real app, we'd need a better cache key than just the file content or path
-    // For now, we assume the last analysis run populated the cache for the active file
-    for (const [key, batch] of this.batchCache.entries()) {
-      const fileResult = batch.files.find(f => f.generatedTests);
-      if (fileResult && fileResult.generatedTests) {
-        console.log("Returning cached tests from batch analysis");
-        return fileResult.generatedTests;
-      }
-    }
+    if (!this.isInitialized || !this.model) { throw new Error("GeminiService not initialized"); }
 
-    // Fallback to single call if not cached
-    return this.client.generateTests(code);
+    const prompt = `Generate unit tests for the following code using Jest:\n\n${code}`;
+    const result = await this.model.generateContent(prompt);
+    return result.response.text();
   }
 
   async fixError(code: string, error: string): Promise<CodeFix> {
-    if (!this.isInitialized) {throw new Error("GeminiService not initialized");}
-    
-    // Check cache for pre-calculated fixes
-    // This is a simplification; matching specific errors to cached fixes is complex
-    // For now, we'll fall back to the direct call for specific error fixes
-    
-    const fix = await this.client.fixError(code, error);
+    if (!this.isInitialized || !this.model) { throw new Error("GeminiService not initialized"); }
+
+    const prompt = `Fix the following error in the code:\nError: ${error}\n\nCode:\n${code}\n\nReturn only the fixed code.`;
+    const result = await this.model.generateContent(prompt);
+    const fixedCode = result.response.text().replace(/```typescript/g, '').replace(/```/g, '').trim();
+
     return {
-      fixedCode: fix.fixedCode,
-      explanation: "Fixed by Gemini AI",
-      diff: "" 
+      fixedCode: fixedCode,
+      explanation: "Fixed by Gemini",
+      diff: ""
     };
   }
 
   async explainCode(code: string): Promise<string> {
-    return "Explanation not implemented yet";
+    if (!this.isInitialized || !this.model) { throw new Error("GeminiService not initialized"); }
+
+    const prompt = `Explain what this code does concisely:\n\n${code}`;
+    const result = await this.model.generateContent(prompt);
+    return result.response.text();
+  }
+
+  async summarize(text: string): Promise<string> {
+    if (!this.isInitialized || !this.model) { throw new Error("GeminiService not initialized"); }
+
+    const prompt = `Summarize the following developer activity log into a concise, natural language update (2-3 sentences) for the developer who is returning to work. Focus on what they were doing last and where they left off. Address the developer directly as "You".\n\nActivity Log:\n${text}`;
+    const result = await this.model.generateContent(prompt);
+    return result.response.text();
+  }
+
+  async plan(goal: string, context: DeveloperContext): Promise<string> {
+    if (!this.isInitialized || !this.model) { throw new Error("GeminiService not initialized"); }
+
+    const prompt = `
+      You are an autonomous coding agent.
+      Goal: ${goal}
+      
+      Context:
+      - Active File: ${context.files.activeFile}
+      - Recent Commits: ${context.git.recentCommits.map(c => c.message).join(', ')}
+      - Recent Edits: ${context.files.recentlyEdited.map(f => f.file).join(', ')}
+      
+      Based on this context, propose a high-level plan (one short sentence) to achieve the goal.
+      Examples:
+      - "Run auto-lint to fix style issues."
+      - "Generate unit tests for the new auth module."
+      - "Fix the type error in the user controller."
+      
+      Plan:
+    `;
+    
+    const result = await this.model.generateContent(prompt);
+    return result.response.text().trim();
+  }
+
+  async getEmbedding(text: string): Promise<number[]> {
+    if (!this.isInitialized || !this.embeddingModel) {
+      console.warn("GeminiService not initialized for embeddings, returning mock.");
+      return new Array(768).fill(0); // Mock 768-dim vector
+    }
+
+    try {
+      const result = await this.embeddingModel.embedContent(text);
+      return result.embedding.values;
+    } catch (error) {
+      console.error("Embedding generation failed:", error);
+      return new Array(768).fill(0);
+    }
   }
 }

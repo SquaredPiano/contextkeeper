@@ -6,6 +6,7 @@ import { IContextService, IGitService, DeveloperContext } from "../interfaces";
 import { GeminiClient } from "../../modules/gemini/gemini-client";
 import { ContextBuilder } from "../../modules/gemini/context-builder";
 import { BatchAnalysisResult, BatchFileResult } from "../../modules/gemini/types";
+import { LanceDBStorage } from "../../services/storage/storage";
 
 export interface FixResult {
   branchName: string;
@@ -27,6 +28,7 @@ export class AutonomousFixService extends EventEmitter {
   private geminiClient: GeminiClient;
   private contextService: IContextService;
   private gitService: IGitService;
+  private storage: LanceDBStorage;
   private workspaceRoot: string;
 
   constructor(
@@ -38,8 +40,12 @@ export class AutonomousFixService extends EventEmitter {
     this.geminiClient = geminiClient;
     this.contextService = contextService;
     this.gitService = gitService;
+    this.storage = new LanceDBStorage();
     this.workspaceRoot =
       vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+    
+    // Connect storage
+    this.storage.connect().catch(e => console.warn("Failed to connect to LanceDB:", e));
   }
 
   /**
@@ -71,7 +77,7 @@ export class AutonomousFixService extends EventEmitter {
       this.emit("progress", 40, `Found ${errors.length} issues`);
 
       // Step 5: Build Gemini context
-      const geminiContext = ContextBuilder.build({
+      const geminiContext = await ContextBuilder.build({
         gitLogs: context.git.recentCommits.map(
           (c) => `${c.hash.substring(0, 7)} - ${c.message}`
         ),
@@ -85,7 +91,7 @@ export class AutonomousFixService extends EventEmitter {
         })),
         fileContents: fileContents,
         workspaceRoot: this.workspaceRoot,
-      });
+      }, this.storage);
 
       // Step 6: Run Gemini batch analysis
       this.emit("progress", 50, "Running AI analysis...");

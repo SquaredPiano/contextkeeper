@@ -1,22 +1,34 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
+import * as dotenv from "dotenv";
+import * as path from "path";
+
+// Load environment variables from .env.local
+dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
+
 import { getLogsWithGitlog } from "./modules/gitlogs/gitlog";
 import { FileWatcher } from "./modules/gitlogs/fileWatcher";
 import { LintingService } from "./modules/gitlogs/LintingService";
 import { ContextIngestionService } from "./services/ingestion/ContextIngestionService";
+import { IngestionVerifier } from "./services/ingestion/IngestionVerifier";
+import { AutonomousAgent } from './modules/autonomous/AutonomousAgent';
+import { DashboardProvider } from './ui/DashboardProvider';
+import { storage } from "./services/storage";
 
-// Import mock services (INTEGRATION POINT: Replace with real services here)
-import { MockContextService } from "./services/mock/MockContextService";
-import { GeminiService } from "./services/real/GeminiService"; // Real AI Service
-import { MockGitService } from "./services/mock/MockGitService";
-import { MockVoiceService } from "./services/mock/MockVoiceService";
+// Import real services
+import { ContextService } from './services/real/ContextService';
+import { GeminiService } from './services/real/GeminiService';
+import { GitService } from './services/real/GitService';
+import { ElevenLabsService } from './modules/elevenlabs/elevenlabs';
+import { LanceDBStorage } from './services/storage/storage';
+// The ContextIngestionService is already imported above, so we don't duplicate it here.
 
 // Import UI components
 import { StatusBarManager } from "./ui/StatusBarManager";
 import { SidebarWebviewProvider } from "./ui/SidebarWebviewProvider";
 import { IssuesTreeProvider } from "./ui/IssuesTreeProvider";
-import { NotificationManager } from "./ui/NotificationManager";
+import { NotificationManager } from './ui/NotificationManager';
 
 // Import interfaces
 import {
@@ -25,18 +37,24 @@ import {
   ExtensionState,
   UIToExtensionMessage,
   IAIService,
+  IGitService,
+  IVoiceService,
 } from "./services/interfaces";
+
+import { CommandManager } from "./managers/CommandManager";
+import { SessionManager } from "./managers/SessionManager";
 
 // Global state
 let statusBar: StatusBarManager;
 let sidebarProvider: SidebarWebviewProvider;
 let issuesTreeProvider: IssuesTreeProvider;
+let commandManager: CommandManager;
 
 // Services (INTEGRATION POINT: Swap mock with real services)
-let contextService: MockContextService;
+let contextService: ContextService;
 let aiService: IAIService;
-let gitService: MockGitService;
-let voiceService: MockVoiceService;
+let gitService: IGitService;
+let voiceService: IVoiceService;
 let lintingService: LintingService;
 let ingestionService: ContextIngestionService;
 
@@ -49,169 +67,170 @@ let isAutonomousMode = false;
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
   console.log('Autonomous Copilot extension is now active!');
-  let fileWatcher: FileWatcher | null = null;
 
-  // Initialize services
-  contextService = new MockContextService();
-  
-  // Initialize Linting Service
-  lintingService = new LintingService();
-  lintingService.initialize(contextService);
+  try {
+    const geminiService = new GeminiService();
+    aiService = geminiService;
 
-  // Initialize Context Ingestion Service (Real Persistence)
-  ingestionService = new ContextIngestionService();
-  ingestionService.initialize(context);
-  
-  // Initialize Gemini Service
-  const geminiService = new GeminiService();
-  aiService = geminiService;
-  
-  // Try to get API key from settings
-  const ckConfig = vscode.workspace.getConfiguration('copilot');
-  const apiKey = ckConfig.get<string>('gemini.apiKey') || process.env.GEMINI_API_KEY || "";
-  
-  if (apiKey) {
-    geminiService.initialize(apiKey).then(() => {
-      console.log("Gemini Service initialized with API Key");
-    }).catch(err => {
-      console.error("Failed to initialize Gemini Service:", err);
-      NotificationManager.showError("Failed to connect to Gemini AI. Check your API Key.");
+    // 1. Initialize Services
+    const storageService = new LanceDBStorage();
+    contextService = new ContextService(storageService, aiService); // Assign to global contextService
+    const sessionManager = new SessionManager(storageService);
+
+    // Initialize Session (Async)
+    sessionManager.initialize().catch((err: any) => console.error("Failed to init session:", err));
+
+    // Initialize Linting Service
+    lintingService = new LintingService(); 
+    lintingService.initialize(contextService);
+
+    // Initialize Context Ingestion Service (Real Persistence)
+    const outputChannel = vscode.window.createOutputChannel("ContextKeeper Ingestion");
+    ingestionService = new ContextIngestionService(storageService, contextService, sessionManager);
+
+    // Don't await here to avoid blocking activation
+    ingestionService.initialize(context).catch((err: any) => {
+      console.error("Failed to initialize ingestion service:", err);
+      outputChannel.appendLine(`Error initializing ingestion: ${err.message}`);
     });
-  } else {
-    console.warn("No Gemini API Key found. AI features will be disabled or mocked.");
-    NotificationManager.showError("Gemini API Key missing. Please set 'contextkeeper.gemini.apiKey' in settings.");
-  }
 
-  gitService = new MockGitService();
-  voiceService = new MockVoiceService();
+    // Try to get API key from settings
+    const ckConfig = vscode.workspace.getConfiguration('copilot');
+    const apiKey = ckConfig.get<string>('gemini.apiKey') || process.env.GEMINI_API_KEY || "";
 
-  // Initialize UI components
-  statusBar = new StatusBarManager();
-  
-  issuesTreeProvider = new IssuesTreeProvider();
-  const treeView = vscode.window.registerTreeDataProvider(
-    'copilot.issuesTree',
-    issuesTreeProvider
-  );
-
-  sidebarProvider = new SidebarWebviewProvider(
-    context.extensionUri,
-    handleWebviewMessage
-  );
-  const webviewProvider = vscode.window.registerWebviewViewProvider(
-    'copilot.mainView',
-    sidebarProvider
-  );
-
-  // Set up service event listeners
-  setupServiceListeners();
-
-  // Register commands
-  registerCommands(context);
-
-  // Add to subscriptions
-  context.subscriptions.push(
-    statusBar,
-    treeView,
-    webviewProvider,
-    lintingService,
-  );
-
-  // Load autonomous mode from settings
-  const config = vscode.workspace.getConfiguration('copilot');
-  isAutonomousMode = config.get('autonomous.enabled', false);
-
-  // Show welcome notification
-  NotificationManager.showSuccess(
-    '🤖 Autonomous Copilot is ready!',
-    'Open Dashboard'
-  ).then(action => {
-    if (action === 'Open Dashboard') {
-      vscode.commands.executeCommand('copilot.showPanel');
+    if (apiKey) {
+      geminiService.initialize(apiKey).then(() => {
+        console.log("Gemini Service initialized with API Key");
+      }).catch(err => {
+        console.error("Failed to initialize Gemini Service:", err);
+        NotificationManager.showError("Failed to connect to Gemini AI. Check your API Key.");
+      });
+    } else {
+      console.warn("No Gemini API Key found. AI features will be disabled or mocked.");
+      NotificationManager.showError("Gemini API Key missing. Please set 'contextkeeper.gemini.apiKey' in settings.");
     }
-  });
 
-  // Legacy commands for backwards compatibility
-  const disposable = vscode.commands.registerCommand(
-    "contextkeeper.helloWorld",
-    () => {
-      vscode.window.showInformationMessage("Hello World from contextkeeper!");
-    }
-  );
+    // Initialize Git Service
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    gitService = new GitService(workspaceRoot);
 
-  const testGitlog = vscode.commands.registerCommand(
-    "contextkeeper.testGitlog",
-    async () => {
+    // Initialize Voice Service (Real or Mock)
+    const elevenLabsApiKey = ckConfig.get<string>('elevenlabs.apiKey') || process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY || "";
+    const voiceEnabled = ckConfig.get<boolean>('voice.enabled', true);
+
+    if (voiceEnabled && elevenLabsApiKey) {
+      const realVoiceService = new ElevenLabsService();
       try {
-        vscode.window.showInformationMessage("Fetching git logs...");
-
-        const logs = await getLogsWithGitlog();
-
-        const outputChannel =
-          vscode.window.createOutputChannel("ContextKeeper");
-        outputChannel.clear();
-        outputChannel.appendLine("=== Recent Git Commits ===");
-        logs.forEach((commit: any, i: number) => {
-          outputChannel.appendLine(`\n${i + 1}. ${commit.subject}`);
-          outputChannel.appendLine(`   Author: ${commit.authorName}`);
-          outputChannel.appendLine(`   Hash: ${commit.hash}`);
-          outputChannel.appendLine(`   Date: ${commit.authorDate}`);
-        });
-        outputChannel.show();
-
-        vscode.window.showInformationMessage(
-          `✅ Found ${logs.length} commits!`
-        );
+        realVoiceService.initialize(elevenLabsApiKey);
+        console.log("ElevenLabs Service initialized");
+        voiceService = realVoiceService;
       } catch (err: any) {
-        vscode.window.showErrorMessage(`❌ Error: ${err.message}`);
-        console.error("Gitlog error:", err);
+        console.error("Failed to initialize ElevenLabs:", err);
       }
-    }
-  );
+    } else {
+      console.log("Using Mock Voice Service (Voice disabled or no API key)");
 
-  const startWatcher = vscode.commands.registerCommand(
-    "contextkeeper.startAutoLint",
-    () => {
-      if (fileWatcher) {
-        vscode.window.showWarningMessage("Auto-lint is already running!");
-        return;
+    }
+
+    // Initialize UI components
+    statusBar = new StatusBarManager();
+
+    issuesTreeProvider = new IssuesTreeProvider();
+    const treeView = vscode.window.registerTreeDataProvider(
+      'copilot.issuesTree',
+      issuesTreeProvider
+    );
+
+    sidebarProvider = new SidebarWebviewProvider(
+      context.extensionUri,
+      handleWebviewMessage
+    );
+    const webviewProvider = vscode.window.registerWebviewViewProvider(
+      'copilot.mainView',
+      sidebarProvider
+    );
+
+    // Set up service event listeners
+    setupServiceListeners();
+
+    // Initialize Command Manager
+    commandManager = new CommandManager(
+      context,
+      contextService,
+      aiService,
+      voiceService,
+      sidebarProvider,
+      statusBar,
+      issuesTreeProvider
+    );
+    commandManager.registerCommands();
+
+    // Add to subscriptions
+    context.subscriptions.push(
+      statusBar,
+      treeView,
+      webviewProvider,
+      lintingService,
+    );
+
+    // Load autonomous mode from settings
+    const config = vscode.workspace.getConfiguration('copilot');
+    isAutonomousMode = config.get('autonomous.enabled', false);
+
+    // Show welcome notification
+    NotificationManager.showSuccess(
+      'Autonomous Copilot is ready!',
+      'Open Dashboard'
+    ).then(async action => {
+      if (action === 'Open Dashboard') {
+        vscode.commands.executeCommand('copilot.showPanel');
       }
 
-      // Get the linting endpoint from settings (or use default)
-      const config = vscode.workspace.getConfiguration("contextkeeper");
-      const endpoint =
-        config.get<string>("lintingEndpoint") ||
-        "https://contextkeeper-worker.workers.dev/lint";
-
-      fileWatcher = new FileWatcher(endpoint);
-      fileWatcher.start();
-
-      vscode.window.showInformationMessage(
-        "🔍 Auto-lint enabled! Files will be checked on save."
-      );
-    }
-  );
-
-  // Command to stop auto-linting
-  const stopWatcher = vscode.commands.registerCommand(
-    "contextkeeper.stopAutoLint",
-    () => {
-      if (!fileWatcher) {
-        vscode.window.showWarningMessage("Auto-lint is not running!");
-        return;
+      // Announce context summary
+      if (voiceService && voiceService.isEnabled()) {
+        const summary = await contextService.getLatestContextSummary();
+        voiceService.speak(summary, 'casual');
+        NotificationManager.showSuccess(summary);
       }
+    });
 
-      fileWatcher.stop();
-      fileWatcher = null;
+    // 3. Register UI Providers
+    const dashboardProvider = new DashboardProvider(context.extensionUri, contextService);
+    context.subscriptions.push(
+      vscode.window.registerWebviewViewProvider(DashboardProvider.viewType, dashboardProvider)
+    );
 
-      vscode.window.showInformationMessage("⏸️ Auto-lint disabled.");
-    }
-  );
+    // 4. Initialize Autonomous Agent
+    const agent = new AutonomousAgent(gitService, geminiService, contextService);
 
-  context.subscriptions.push(startWatcher);
-  context.subscriptions.push(stopWatcher);
-  context.subscriptions.push(testGitlog);
-  context.subscriptions.push(disposable);
+    // 5. Start Autonomous Scheduler
+    const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+    const schedulerInterval = setInterval(async () => {
+      console.log('ContextKeeper: Triggering scheduled autonomous task...');
+      try {
+        // Only run if not already running
+        // We can check agent state if we expose it, or just fire and let it handle concurrency
+        await agent.startSession('auto-lint');
+      } catch (error) {
+        console.error('Scheduled task failed:', error);
+      }
+    }, SCHEDULER_INTERVAL_MS);
+
+    context.subscriptions.push({ dispose: () => clearInterval(schedulerInterval) });
+
+    // Register Verification Command
+    context.subscriptions.push(
+      vscode.commands.registerCommand('copilot.verifyIngestion', async () => {
+        const verifier = new IngestionVerifier(ingestionService, storageService);
+        await verifier.runVerification();
+      })
+    );
+
+    console.log('ContextKeeper: Extension Activated');
+  } catch (error: any) {
+    console.error("Extension activation failed:", error);
+    vscode.window.showErrorMessage(`Autonomous Copilot failed to activate: ${error.message}`);
+  }
 }
 
 /**
@@ -247,7 +266,7 @@ function setupServiceListeners() {
 
   aiService.on('analysisComplete', (analysis: AIAnalysis) => {
     currentAnalysis = analysis;
-    
+
     // Update UI components
     const state: ExtensionState = {
       status: 'complete',
@@ -302,7 +321,7 @@ function registerCommands(context: vscode.ExtensionContext) {
       if (isAutonomousMode) {
         NotificationManager.showAutonomousStarted();
       } else {
-        NotificationManager.showSuccess('🤖 Autonomous mode disabled');
+        NotificationManager.showSuccess('Autonomous mode disabled');
       }
     })
   );
@@ -323,12 +342,12 @@ function registerCommands(context: vscode.ExtensionContext) {
 
   // Navigate to issue
   context.subscriptions.push(
-    vscode.commands.registerCommand('copilot.navigateToIssue', 
+    vscode.commands.registerCommand('copilot.navigateToIssue',
       async (file: string, line: number, column: number = 0) => {
         try {
           const document = await vscode.workspace.openTextDocument(file);
           const editor = await vscode.window.showTextDocument(document);
-          
+
           const position = new vscode.Position(line - 1, column);
           editor.selection = new vscode.Selection(position, position);
           editor.revealRange(
@@ -421,10 +440,10 @@ async function runAnalysis(): Promise<void> {
       'Analyzing code...',
       async (progress) => {
         progress.report({ increment: 0, message: 'Collecting context' });
-        
+
         // The AI service will emit progress events that update the UI
         const analysis = await aiService.analyze(code, currentContext!);
-        
+
         progress.report({ increment: 100, message: 'Complete!' });
         return analysis;
       }
@@ -437,7 +456,7 @@ async function runAnalysis(): Promise<void> {
     };
     statusBar.setState(state);
     sidebarProvider.showError(error.message);
-    
+
     await NotificationManager.showErrorWithRetry(
       `Analysis failed: ${error.message}`,
       () => runAnalysis()
@@ -449,12 +468,11 @@ async function runAnalysis(): Promise<void> {
 export function deactivate() {
   console.log('Autonomous Copilot extension is being deactivated');
   // Clean up linting service
-  if (lintingService) {
-    lintingService.dispose();
-  }
+  // if (lintingService) {
+  //     lintingService.dispose();
+  // }
   // Clean up ingestion service
   if (ingestionService) {
     ingestionService.dispose();
   }
 }
-

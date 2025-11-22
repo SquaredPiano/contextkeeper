@@ -8,19 +8,19 @@ import { storage } from './index';
 import { EventRecord } from './schema';
 
 async function verifyPersistence() {
-  console.log('🔍 Starting Persistence Layer Verification...');
+  console.log('[INFO] Starting Persistence Layer Verification...');
   console.log('-------------------------------------------');
 
   try {
     // 1. Connect
     console.log('1. Connecting to LanceDB...');
     await storage.connect();
-    console.log('✅ Connected.');
+    console.log('[OK] Connected.');
 
     // 2. Cleanup (Optional - to ensure clean state)
     console.log('2. Clearing existing tables for test...');
     await storage.clearAllTables();
-    console.log('✅ Tables cleared and re-initialized.');
+    console.log('[OK] Tables cleared and re-initialized.');
 
     // 3. Log Events
     console.log('3. Logging sample events...');
@@ -48,7 +48,7 @@ async function verifyPersistence() {
     for (const event of events) {
       await storage.logEvent(event);
     }
-    console.log(`✅ Logged ${events.length} events.`);
+    console.log(`[OK] Logged ${events.length} events.`);
 
     // 4. Verify Events Retrieval
     console.log('4. Verifying event retrieval...');
@@ -56,14 +56,14 @@ async function verifyPersistence() {
     if (recentEvents.length < 3) {
       throw new Error(`Expected at least 3 events, found ${recentEvents.length}`);
     }
-    console.log(`✅ Retrieved ${recentEvents.length} recent events.`);
+    console.log(`[OK] Retrieved ${recentEvents.length} recent events.`);
 
     // 5. Create Session (with Embedding)
     console.log('5. Creating a session with embedding...');
     const summary = "Implemented the new storage layer using LanceDB for vector persistence.";
     const project = "contextkeeper";
     const session = await storage.createSession(summary, project);
-    console.log(`✅ Session created with ID: ${session.id}`);
+    console.log(`[OK] Session created with ID: ${session.id}`);
     console.log(`   Embedding length: ${session.embedding.length} (Expected: 768)`);
 
     if (session.embedding.length !== 768) {
@@ -80,20 +80,20 @@ async function verifyPersistence() {
     }
     
     const topMatch = similarSessions[0];
-    console.log(`✅ Found match: "${topMatch.summary}"`);
+    console.log(`[OK] Found match: "${topMatch.summary}"`);
     console.log(`   Match ID: ${topMatch.id}`);
 
     if (topMatch.id !== session.id) {
-      console.warn('⚠️  Top match ID does not match created session ID (might be due to other data or embedding similarity nuances).');
+      console.warn('[WARN] Top match ID does not match created session ID (might be due to other data or embedding similarity nuances).');
     } else {
-      console.log('✅ Top match is the session we just created.');
+      console.log('[OK] Top match is the session we just created.');
     }
 
     console.log('-------------------------------------------');
-    console.log('🎉 VERIFICATION SUCCESSFUL: Persistence layer is robust and operational.');
+    console.log('[SUCCESS] VERIFICATION SUCCESSFUL: Persistence layer is robust and operational.');
 
   } catch (error) {
-    console.error('❌ VERIFICATION FAILED:', error);
+    console.error('[FAILED] VERIFICATION FAILED:', error);
     process.exit(1);
   }
 }

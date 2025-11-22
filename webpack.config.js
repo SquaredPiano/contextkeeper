@@ -20,7 +20,11 @@ const extensionConfig = {
     libraryTarget: 'commonjs2'
   },
   externals: {
-    vscode: 'commonjs vscode' // the vscode-module is created on-the-fly and must be excluded. Add other modules that cannot be webpack'ed, 📖 -> https://webpack.js.org/configuration/externals/
+    vscode: 'commonjs vscode', // the vscode-module is created on-the-fly and must be excluded. Add other modules that cannot be webpack'ed, 📖 -> https://webpack.js.org/configuration/externals/
+    '@lancedb/lancedb': 'commonjs @lancedb/lancedb', // Exclude LanceDB (native module) from bundling
+    'bufferutil': 'commonjs bufferutil',
+    'utf-8-validate': 'commonjs utf-8-validate',
+    'fsevents': 'commonjs fsevents',
     // modules added here also need to be added in the .vscodeignore file
   },
   resolve: {

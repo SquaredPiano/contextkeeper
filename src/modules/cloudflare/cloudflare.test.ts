@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CloudflareClient } from './client';
 import worker from './worker';
+import { detectLanguage } from './utils/language';
+import { scanPythonRisks, scanJsTsRisks } from './utils/security';
+import { lintJsTs } from './utils/linter';
 
 // Mock global fetch for client tests
 const fetchMock = vi.fn();
@@ -106,5 +109,59 @@ describe('CloudflareWorker', () => {
 
     const response = await worker.fetch(request);
     expect(response.status).toBe(400);
+  });
+});
+
+describe('Language Detection', () => {
+  it('should detect python', () => {
+    expect(detectLanguage('def foo(): pass')).toBe('python');
+    expect(detectLanguage('import os')).toBe('python');
+  });
+
+  it('should detect typescript', () => {
+    expect(detectLanguage('const x: number = 1; import foo from "bar";')).toBe('ts');
+    expect(detectLanguage('interface User { name: string; }')).toBe('ts');
+  });
+
+  it('should detect javascript', () => {
+    expect(detectLanguage('const x = 1;')).toBe('js');
+    expect(detectLanguage('function foo() {}')).toBe('js');
+  });
+
+  it('should detect go', () => {
+    expect(detectLanguage('package main')).toBe('go');
+  });
+
+  it('should detect json', () => {
+    expect(detectLanguage('{"a": 1}')).toBe('json');
+  });
+});
+
+describe('Security Scanner', () => {
+  it('should detect eval in JS', () => {
+    const risks = scanJsTsRisks('eval("alert(1)")', 'js');
+    expect(risks).toHaveLength(1);
+    expect(risks[0].severity).toBe('high');
+  });
+
+  it('should detect hardcoded passwords in Python', () => {
+    const risks = scanPythonRisks('password = "secret"');
+    expect(risks).toHaveLength(1);
+    expect(risks[0].severity).toBe('high');
+  });
+});
+
+describe('Linter', () => {
+  it('should add semicolons', () => {
+    const code = 'const x = 1\nconst y = 2';
+    const fixed = lintJsTs(code);
+    expect(fixed).toContain('const x = 1;');
+    expect(fixed).toContain('const y = 2;');
+  });
+
+  it('should fix spacing', () => {
+    const code = 'if(true){';
+    const fixed = lintJsTs(code);
+    expect(fixed).toContain('if (true)');
   });
 });
