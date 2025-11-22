@@ -60,9 +60,10 @@ describe('IdleService', () => {
     // Get the idle callback
     const idleCallback = mockDetectorInstance.on.mock.calls.find((call: any) => call[0] === 'idle')[1];
     
-    // Mock storage response
+    // Mock storage response with events that are newer than the service's lastSessionTime
+    const now = Date.now();
     (storage.getRecentEvents as any).mockResolvedValue([
-      { timestamp: Date.now(), event_type: 'file_edit', file_path: 'test.ts' }
+      { timestamp: now + 1000, event_type: 'file_edit', file_path: 'test.ts' }
     ]);
     (storage.createSession as any).mockResolvedValue({ id: 'session-1', summary: 'test' });
 
@@ -85,5 +86,31 @@ describe('IdleService', () => {
 
     expect(storage.getRecentEvents).toHaveBeenCalled();
     expect(storage.createSession).not.toHaveBeenCalled();
+  });
+
+  it('should use AI service for summary when provided', async () => {
+    const mockAIService = {
+      summarize: vi.fn().mockResolvedValue('AI-generated summary of your work session')
+    };
+    
+    const serviceWithAI = new IdleService({ thresholdMs: 1000 }, mockAIService as any);
+    await serviceWithAI.initialize();
+    
+    // Get the mock instance from the new service
+    const newMockDetectorInstance = (IdleDetector as any).mock.results[(IdleDetector as any).mock.results.length - 1].value;
+    const idleCallback = newMockDetectorInstance.on.mock.calls.find((call: any) => call[0] === 'idle')[1];
+    
+    // Mock storage response with events that are newer than the service's lastSessionTime
+    const now = Date.now();
+    (storage.getRecentEvents as any).mockResolvedValue([
+      { timestamp: now + 1000, event_type: 'file_edit', file_path: 'test.ts' },
+      { timestamp: now + 2000, event_type: 'file_open', file_path: 'test2.ts' }
+    ]);
+    (storage.createSession as any).mockResolvedValue({ id: 'session-1', summary: 'AI-generated summary' });
+
+    await idleCallback();
+
+    expect(mockAIService.summarize).toHaveBeenCalled();
+    expect(storage.createSession).toHaveBeenCalledWith('AI-generated summary of your work session', expect.any(String));
   });
 });

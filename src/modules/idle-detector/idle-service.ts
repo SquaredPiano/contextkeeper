@@ -3,14 +3,20 @@ import { IdleDetector } from './idle-detector';
 import { IIdleService, IdleConfig } from './types';
 import { storage } from '../../services/storage';
 import { EventRecord } from '../../services/storage/schema';
+import { IAIService } from '../../services/interfaces';
+
+// Hardcoded idle threshold: 15 seconds exactly
+const DEFAULT_IDLE_THRESHOLD_MS = 15000;
 
 export class IdleService implements IIdleService {
     private detector: IdleDetector;
     private lastSessionTime: number = Date.now();
     private isEnabled: boolean = true;
+    private aiService: IAIService | null = null;
 
-    constructor(config: IdleConfig = { thresholdMs: 5 * 60 * 1000 }) { // Default 5 minutes
+    constructor(config: IdleConfig = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, aiService?: IAIService) {
         this.detector = new IdleDetector(config);
+        this.aiService = aiService || null;
     }
 
     public async initialize(): Promise<void> {
@@ -71,9 +77,28 @@ export class IdleService implements IIdleService {
     }
 
     private async generateSessionSummary(events: EventRecord[]): Promise<string> {
-        // Simple heuristic summary for now
-        // In a real implementation, this would call Gemini/LLM to summarize the events
-        
+        // Try to use Gemini AI for intelligent summarization
+        if (this.aiService) {
+            try {
+                // Format events into an activity log
+                const activityLog = events.map(event => {
+                    const timestamp = new Date(event.timestamp).toLocaleTimeString();
+                    const eventType = event.event_type.replace(/_/g, ' ');
+                    const filePath = event.file_path || 'unknown';
+                    const details = event.metadata ? JSON.stringify(event.metadata) : '';
+                    return `[${timestamp}] ${eventType}: ${filePath}${details ? ` (${details})` : ''}`;
+                }).join('\n');
+
+                const summary = await this.aiService.summarize(activityLog);
+                console.log('[IdleService] Generated AI summary via Gemini');
+                return summary;
+            } catch (error) {
+                console.warn('[IdleService] AI summary failed, falling back to heuristic:', error);
+                // Fall through to heuristic summary
+            }
+        }
+
+        // Fallback: Simple heuristic summary
         const fileEdits = events.filter(e => e.event_type === 'file_edit');
         const fileOpens = events.filter(e => e.event_type === 'file_open');
         

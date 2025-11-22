@@ -155,6 +155,7 @@
     "demo:git": "tsx src/modules/gitlogs/demo.ts",
     "demo:gitlogs": "tsx src/modules/gitlogs/demo.ts",
     "demo:orchestrator": "tsx src/modules/orchestrator/demo.ts",
+    "demo:ingestion": "tsx src/demo-full-ingestion.ts",
     "demo:idle": "tsx src/modules/idle-detector/demo.ts",
     "demo:extension": "tsx demo.ts extension",
     "demo:all": "tsx demo.ts all"

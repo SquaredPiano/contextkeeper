@@ -43,9 +43,45 @@ export class GitService implements IGitService {
   public async getCurrentBranch(): Promise<string> {
     try {
       const { stdout } = await execPromise('git branch --show-current', { cwd: this.repoPath });
-      return stdout.trim();
+      const branch = stdout.trim();
+      return branch || "unknown";
     } catch (e) {
+      console.warn(`[GitService] Failed to get current branch: ${e instanceof Error ? e.message : String(e)}`);
       return "unknown";
+    }
+  }
+
+  public async getUncommittedChanges(): Promise<string[]> {
+    try {
+      // Get list of modified, added, and deleted files
+      const { stdout: statusStdout } = await execPromise('git status --porcelain', { cwd: this.repoPath });
+      
+      if (!statusStdout || !statusStdout.trim()) {
+        return [];
+      }
+
+      // Parse porcelain format: XY filename
+      // X = index status, Y = working tree status
+      // M = modified, A = added, D = deleted, R = renamed, C = copied
+      const changes: string[] = [];
+      const lines = statusStdout.trim().split('\n');
+      
+      for (const line of lines) {
+        if (line.length < 3) continue;
+        
+        const status = line.substring(0, 2);
+        const filePath = line.substring(3).trim();
+        
+        // Only include files that have actual changes (not just untracked)
+        if (status[0] !== '?' && status[1] !== '?') {
+          changes.push(filePath);
+        }
+      }
+      
+      return changes;
+    } catch (e) {
+      console.warn(`[GitService] Failed to get uncommitted changes: ${e instanceof Error ? e.message : String(e)}`);
+      return [];
     }
   }
 

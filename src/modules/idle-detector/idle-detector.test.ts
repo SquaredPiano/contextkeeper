@@ -90,4 +90,23 @@ describe('IdleDetector', () => {
     
     expect(idleSpy).not.toHaveBeenCalled();
   });
+
+  it('should use 15 seconds as default threshold', () => {
+    const detectorWithDefault = new IdleDetector();
+    const idleSpy = vi.fn();
+    detectorWithDefault.on('idle', idleSpy);
+    
+    detectorWithDefault.start();
+    
+    // Should not fire before 15 seconds
+    vi.advanceTimersByTime(14999);
+    expect(idleSpy).not.toHaveBeenCalled();
+    
+    // Should fire exactly at 15 seconds
+    vi.advanceTimersByTime(1);
+    expect(idleSpy).toHaveBeenCalled();
+    expect(detectorWithDefault.isIdle).toBe(true);
+    
+    detectorWithDefault.stop();
+  });
 });

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
+import { GitService } from '../../modules/gitlogs/GitService';
 
 export interface GitCommitEvent {
   hash: string;
@@ -47,9 +48,11 @@ export class GitWatcher extends EventEmitter {
   private disposables: vscode.Disposable[] = [];
   private lastCommitHash: string | undefined;
   private repository: Repository | undefined;
+  private gitService: GitService;
 
   constructor(private workspaceRoot: string) {
     super();
+    this.gitService = new GitService(workspaceRoot);
   }
 
   public async start(): Promise<void> {
@@ -118,25 +121,50 @@ export class GitWatcher extends EventEmitter {
               if (commits.length > 0) {
                   const commit = commits[0];
                   
-                  // Only emit if it's actually a new commit (not just a checkout of an old one, ideally)
-                  // But for tracking "user context", switching branches is also relevant context!
-                  // However, the interface expects "GitCommitEvent".
-                  // Let's emit it.
+                  // Get file list from GitService
+                  let files: string[] = [];
+                  try {
+                      // Use git show to get files changed in this commit
+                      const { exec } = await import('child_process');
+                      const { promisify } = await import('util');
+                      const execAsync = promisify(exec);
+                      
+                      const { stdout } = await execAsync(
+                          `git show --name-only --pretty=format: ${commit.hash}`,
+                          { cwd: this.workspaceRoot, timeout: 2000 }
+                      );
+                      
+                      files = stdout
+                          .trim()
+                          .split('\n')
+                          .filter(line => line.trim().length > 0 && !line.startsWith('commit'));
+                  } catch (fileError) {
+                      console.warn(`[GitWatcher] Failed to get files for commit ${commit.hash}:`, fileError);
+                      // Fallback: try to get files from recent commits using GitService
+                      try {
+                          const recentCommits = await this.gitService.getRecentCommits(1);
+                          if (recentCommits.length > 0 && recentCommits[0].hash === commit.hash) {
+                              files = recentCommits[0].files || [];
+                          }
+                      } catch (fallbackError) {
+                          console.warn(`[GitWatcher] Fallback file retrieval also failed:`, fallbackError);
+                      }
+                  }
                   
                   const event: GitCommitEvent = {
                       hash: commit.hash,
                       message: commit.message,
                       author: commit.authorName || 'Unknown',
                       date: commit.authorDate?.toISOString() || new Date().toISOString(),
-                      files: [] // VS Code Git API log doesn't easily give files in the summary, would need `git show`.
-                                // For now, we leave files empty or we could use `git diff-tree` if we had access to raw git.
-                                // Or we can use our `GitService` to fetch details if needed.
+                      files: files
                   };
                   
+                  console.log(`[GitWatcher] Emitting commit event: ${commit.hash} with ${files.length} files`);
                   this.emit('commit', event);
               }
           } catch (e) {
-              console.error('Error fetching commit details:', e);
+              const errorMsg = e instanceof Error ? e.message : String(e);
+              console.error(`[GitWatcher] Error fetching commit details: ${errorMsg}`, e);
           }
       }
   }

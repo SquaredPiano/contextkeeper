@@ -51,6 +51,9 @@ npm run demo:voice
 # Git Logs Demo
 npm run demo:git
 
+# Full Ingestion & GenAI Demo
+npm run demo:ingestion
+
 # Orchestrator Pipeline Demo
 npm run demo:orchestrator
 
