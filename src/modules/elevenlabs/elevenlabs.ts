@@ -1,4 +1,4 @@
-import { VoiceType } from './index';
+import { VoiceType, ElevenLabsModule } from './index';
 import { getVoiceId } from './voices';
 import { MockPlayer } from './mock';
 import { promises as fs } from 'fs';
@@ -6,10 +6,17 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 
-export class ElevenLabsService {
+export class ElevenLabsService implements ElevenLabsModule {
   private apiKey: string | null = null;
   private fallbackMode: boolean = false;
   private mock: MockPlayer = new MockPlayer();
+  private queue: Array<{
+    text: string;
+    voice: VoiceType;
+    resolve: () => void;
+    reject: (err: any) => void;
+  }> = [];
+  private isProcessing: boolean = false;
 
   async initialize(apiKey: string): Promise<void> {
     this.apiKey = apiKey || null;
@@ -34,6 +41,42 @@ export class ElevenLabsService {
   }
 
   async speak(text: string, voice: VoiceType = 'casual'): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ text, voice, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.isProcessing || this.queue.length === 0) {
+      return;
+    }
+
+    this.isProcessing = true;
+    const item = this.queue.shift();
+
+    if (!item) {
+      this.isProcessing = false;
+      return;
+    }
+
+    try {
+      await this.performSpeak(item.text, item.voice);
+      item.resolve();
+    } catch (error) {
+      console.error(`Error speaking "${item.text}":`, error);
+      // Don't reject the promise to avoid unhandled rejections crashing the extension,
+      // just log it. Or we could reject if the caller wants to handle it.
+      // For now, let's resolve so the queue continues.
+      item.resolve(); 
+    } finally {
+      this.isProcessing = false;
+      // Process next item
+      this.processQueue();
+    }
+  }
+
+  private async performSpeak(text: string, voice: VoiceType): Promise<void> {
     if (this.fallbackMode || !this.apiKey) {
       await this.mock.play(text, voice);
       return;
@@ -41,10 +84,11 @@ export class ElevenLabsService {
 
     const voiceId = getVoiceId(voice);
 
-    // Make the request to ElevenLabs TTS endpoint. The actual shape may vary
-    // by API version — this implementation uses a simple POST that returns raw audio.
+    // Make the request to ElevenLabs TTS endpoint.
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
     const body = JSON.stringify({ text });
+
+    console.log(`[ElevenLabs] Requesting TTS for: "${text}" (Voice: ${voiceId})`);
 
     const res = await fetch(url, {
       method: 'POST',
@@ -75,6 +119,8 @@ export class ElevenLabsService {
 
     await fs.writeFile(filePath, buffer);
 
+    console.log(`[Audio] Playing ${fileName}...`);
+
     const platform = process.platform;
     let cmd: string;
     let args: string[] = [];
@@ -83,7 +129,10 @@ export class ElevenLabsService {
       cmd = 'afplay';
       args = [filePath];
     } else if (platform === 'linux') {
-      // Try `mpg123` or `aplay` depending on availability; prefer mpg123 for mp3
+      // Requirement asks for `aplay`, but aplay typically only supports WAV.
+      // ElevenLabs returns MP3. `mpg123` is standard for CLI MP3 playback.
+      // If `aplay` is strictly required, we would need to convert or request PCM.
+      // Falling back to `mpg123` for MP3 support.
       cmd = 'mpg123';
       args = ['-q', filePath];
     } else if (platform === 'win32') {

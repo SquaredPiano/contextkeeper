@@ -15,7 +15,7 @@
 	},
 
 	"exclude": [
-    "cloudflare",
+    "src/modules/cloudflare",
     "dist",
     "node_modules"
 	]

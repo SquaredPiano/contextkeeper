@@ -23,8 +23,9 @@ describe('ElevenLabsService', () => {
 
   it('should use different voices', async () => {
     const service = new ElevenLabsService();
-    await service.initialize(process.env.ELEVENLABS_API_KEY || '');
-
+    const apiKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY || '';
+    await service.initialize(apiKey);
+    
     // These should not throw (may use fallback)
     await service.speak('Casual', 'casual');
     await service.speak('Professional', 'professional');

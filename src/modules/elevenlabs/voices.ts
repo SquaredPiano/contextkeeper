@@ -1,9 +1,13 @@
 import { VoiceType } from './index';
 
 export const voiceMap: Record<VoiceType, string> = {
-  casual: 'casual-voice-id',
-  professional: 'professional-voice-id',
-  encouraging: 'encouraging-voice-id'
+  // Using standard ElevenLabs voices:
+  // Rachel (American, calm)
+  casual: '21m00Tcm4TlvDq8ikWAM',
+  // Antoni (American, well-modulated)
+  professional: 'ErXwobaYiN019PkySvjV',
+  // Josh (American, deep)
+  encouraging: 'TxGEqnHWrfWFTfGW9XjX'
 };
 
 export function getVoiceId(voice: VoiceType): string {
