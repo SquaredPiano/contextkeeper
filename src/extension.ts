@@ -6,7 +6,7 @@ import { FileWatcher } from "./modules/gitlogs/fileWatcher";
 
 // Import mock services (INTEGRATION POINT: Replace with real services here)
 import { MockContextService } from "./services/mock/MockContextService";
-import { MockAIService } from "./services/mock/MockAIService";
+import { GeminiService } from "./services/real/GeminiService"; // Real AI Service
 import { MockGitService } from "./services/mock/MockGitService";
 import { MockVoiceService } from "./services/mock/MockVoiceService";
 
@@ -22,6 +22,7 @@ import {
   AIAnalysis,
   ExtensionState,
   UIToExtensionMessage,
+  IAIService,
 } from "./services/interfaces";
 
 // Global state
@@ -31,7 +32,7 @@ let issuesTreeProvider: IssuesTreeProvider;
 
 // Services (INTEGRATION POINT: Swap mock with real services)
 let contextService: MockContextService;
-let aiService: MockAIService;
+let aiService: IAIService;
 let gitService: MockGitService;
 let voiceService: MockVoiceService;
 
@@ -46,10 +47,29 @@ export function activate(context: vscode.ExtensionContext) {
   console.log('Autonomous Copilot extension is now active!');
   let fileWatcher: FileWatcher | null = null;
 
-  // Initialize services with MOCK implementations
-  // INTEGRATION: Replace these with real service instances when backend is ready
+  // Initialize services
   contextService = new MockContextService();
-  aiService = new MockAIService();
+  
+  // Initialize Gemini Service
+  const geminiService = new GeminiService();
+  aiService = geminiService;
+  
+  // Try to get API key from settings
+  const ckConfig = vscode.workspace.getConfiguration('copilot');
+  const apiKey = ckConfig.get<string>('gemini.apiKey') || process.env.GEMINI_API_KEY || "";
+  
+  if (apiKey) {
+    geminiService.initialize(apiKey).then(() => {
+      console.log("Gemini Service initialized with API Key");
+    }).catch(err => {
+      console.error("Failed to initialize Gemini Service:", err);
+      NotificationManager.showError("Failed to connect to Gemini AI. Check your API Key.");
+    });
+  } else {
+    console.warn("No Gemini API Key found. AI features will be disabled or mocked.");
+    NotificationManager.showError("Gemini API Key missing. Please set 'contextkeeper.gemini.apiKey' in settings.");
+  }
+
   gitService = new MockGitService();
   voiceService = new MockVoiceService();
 

@@ -45,17 +45,17 @@ exports.deactivate = deactivate;
 // Import the module and reference it with the alias vscode in your code below
 const vscode = __importStar(__webpack_require__(1));
 const gitlog_1 = __webpack_require__(2);
-const fileWatcher_1 = __webpack_require__(18);
+const fileWatcher_1 = __webpack_require__(28);
 // Import mock services (INTEGRATION POINT: Replace with real services here)
-const MockContextService_1 = __webpack_require__(19);
-const MockAIService_1 = __webpack_require__(21);
-const MockGitService_1 = __webpack_require__(22);
-const MockVoiceService_1 = __webpack_require__(23);
+const MockContextService_1 = __webpack_require__(18);
+const GeminiService_1 = __webpack_require__(20); // Real AI Service
+const MockGitService_1 = __webpack_require__(21);
+const MockVoiceService_1 = __webpack_require__(22);
 // Import UI components
-const StatusBarManager_1 = __webpack_require__(24);
-const SidebarWebviewProvider_1 = __webpack_require__(25);
-const IssuesTreeProvider_1 = __webpack_require__(27);
-const NotificationManager_1 = __webpack_require__(28);
+const StatusBarManager_1 = __webpack_require__(23);
+const SidebarWebviewProvider_1 = __webpack_require__(24);
+const IssuesTreeProvider_1 = __webpack_require__(26);
+const NotificationManager_1 = __webpack_require__(27);
 // Global state
 let statusBar;
 let sidebarProvider;
@@ -74,10 +74,26 @@ let isAutonomousMode = false;
 function activate(context) {
     console.log('Autonomous Copilot extension is now active!');
     let fileWatcher = null;
-    // Initialize services with MOCK implementations
-    // INTEGRATION: Replace these with real service instances when backend is ready
+    // Initialize services
     contextService = new MockContextService_1.MockContextService();
-    aiService = new MockAIService_1.MockAIService();
+    // Initialize Gemini Service
+    const geminiService = new GeminiService_1.GeminiService();
+    aiService = geminiService;
+    // Try to get API key from settings
+    const ckConfig = vscode.workspace.getConfiguration('copilot');
+    const apiKey = ckConfig.get('gemini.apiKey') || process.env.GEMINI_API_KEY || "";
+    if (apiKey) {
+        geminiService.initialize(apiKey).then(() => {
+            console.log("Gemini Service initialized with API Key");
+        }).catch(err => {
+            console.error("Failed to initialize Gemini Service:", err);
+            NotificationManager_1.NotificationManager.showError("Failed to connect to Gemini AI. Check your API Key.");
+        });
+    }
+    else {
+        console.warn("No Gemini API Key found. AI features will be disabled or mocked.");
+        NotificationManager_1.NotificationManager.showError("Gemini API Key missing. Please set 'contextkeeper.gemini.apiKey' in settings.");
+    }
     gitService = new MockGitService_1.MockGitService();
     voiceService = new MockVoiceService_1.MockVoiceService();
     // Initialize UI components
@@ -1970,172 +1986,6 @@ module.exports = require("node:tty");
 
 /***/ }),
 /* 18 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.FileWatcher = void 0;
-const vscode = __importStar(__webpack_require__(1));
-class FileWatcher {
-    watcher = null;
-    disposables = [];
-    lintingEndpoint;
-    constructor(lintingEndpoint = "https://your-worker.workers.dev/lint") {
-        this.lintingEndpoint = lintingEndpoint;
-    }
-    /**
-     * Start watching files in the workspace
-     */
-    start() {
-        console.log("[FileWatcher] Starting file monitoring...");
-        // Method 1: Watch specific file patterns (glob patterns)
-        // This creates a watcher for TypeScript and JavaScript files
-        this.watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,js,tsx,jsx}", // Watch these file types
-        false, // Don't ignore creates
-        false, // Don't ignore changes
-        false // Don't ignore deletes
-        );
-        // React to file creation
-        this.watcher.onDidCreate((uri) => {
-            console.log(`[FileWatcher] File created: ${uri.fsPath}`);
-            vscode.window.showInformationMessage(`📄 New file: ${uri.fsPath}`);
-        });
-        // React to file changes
-        this.watcher.onDidChange((uri) => {
-            console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
-        });
-        // React to file deletion
-        this.watcher.onDidDelete((uri) => {
-            console.log(`[FileWatcher] File deleted: ${uri.fsPath}`);
-        });
-        // Method 2: Watch for document saves (best for auto-linting)
-        const saveWatcher = vscode.workspace.onDidSaveTextDocument(async (document) => {
-            await this.onFileSaved(document);
-        });
-        // Method 3: Watch for any text document changes (real-time)
-        const changeWatcher = vscode.workspace.onDidChangeTextDocument((event) => {
-            // Only process if there are actual content changes
-            if (event.contentChanges.length > 0) {
-                console.log(`[FileWatcher] Document modified: ${event.document.fileName}`);
-            }
-        });
-        this.disposables.push(saveWatcher, changeWatcher);
-    }
-    /**
-     * Handle file save event - auto-lint the file
-     */
-    async onFileSaved(document) {
-        // Only process certain file types
-        const validExtensions = [".ts", ".js", ".tsx", ".jsx"];
-        const fileExt = document.fileName.substring(document.fileName.lastIndexOf("."));
-        if (!validExtensions.includes(fileExt)) {
-            return; // Skip non-code files
-        }
-        console.log(`[FileWatcher] Auto-linting: ${document.fileName}`);
-        try {
-            const code = document.getText();
-            // Call your Cloudflare worker to lint the code
-            const response = await fetch(this.lintingEndpoint, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code }),
-            });
-            if (!response.ok) {
-                throw new Error(`Linting failed: ${response.statusText}`);
-            }
-            const result = await response.json();
-            // Show results to user
-            if (result.warnings && result.warnings.length > 0) {
-                const message = `⚠️ ${result.warnings.length} issue(s) found in ${document.fileName}`;
-                vscode.window.showWarningMessage(message);
-                // Optionally show detailed warnings in output channel
-                const outputChannel = vscode.window.createOutputChannel("Auto-Linter");
-                outputChannel.clear();
-                outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===\n`);
-                result.warnings.forEach((warning) => {
-                    outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
-                });
-                outputChannel.show();
-            }
-            else {
-                vscode.window.showInformationMessage(`✅ No issues found in ${document.fileName}`);
-            }
-            // If linting produced a fixed version, optionally apply it
-            if (result.linted && result.fixed !== code) {
-                const applyFix = await vscode.window.showInformationMessage("Apply auto-fix?", "Yes", "No");
-                if (applyFix === "Yes") {
-                    await this.applyFix(document, result.fixed);
-                }
-            }
-        }
-        catch (error) {
-            console.error("[FileWatcher] Linting error:", error);
-            vscode.window.showErrorMessage(`Linting failed: ${error}`);
-        }
-    }
-    /**
-     * Apply the fixed code to the document
-     */
-    async applyFix(document, fixedCode) {
-        const edit = new vscode.WorkspaceEdit();
-        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
-        edit.replace(document.uri, fullRange, fixedCode);
-        await vscode.workspace.applyEdit(edit);
-        await document.save();
-        vscode.window.showInformationMessage("✅ Auto-fix applied!");
-    }
-    /**
-     * Stop watching files and clean up
-     */
-    stop() {
-        if (this.watcher) {
-            this.watcher.dispose();
-            this.watcher = null;
-        }
-        this.disposables.forEach((d) => d.dispose());
-        this.disposables = [];
-        console.log("[FileWatcher] Stopped file monitoring");
-    }
-}
-exports.FileWatcher = FileWatcher;
-
-
-/***/ }),
-/* 19 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 "use strict";
@@ -2148,7 +1998,7 @@ exports.FileWatcher = FileWatcher;
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.MockContextService = void 0;
-const events_1 = __webpack_require__(20);
+const events_1 = __webpack_require__(19);
 class MockContextService extends events_1.EventEmitter {
     mockContext;
     constructor() {
@@ -2260,236 +2110,111 @@ exports.MockContextService = MockContextService;
 
 
 /***/ }),
-/* 20 */
+/* 19 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("events");
 
 /***/ }),
-/* 21 */
+/* 20 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 "use strict";
 
-/**
- * Mock AI Service
- *
- * Provides fake AI analysis results for UI development.
- * INTEGRATION: Replace with real AIService that calls Gemini API.
- */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MockAIService = void 0;
-const events_1 = __webpack_require__(20);
-class MockAIService extends events_1.EventEmitter {
-    currentAnalysis = null;
+exports.GeminiService = void 0;
+const gemini_client_1 = __webpack_require__(29);
+const context_builder_1 = __webpack_require__(31);
+const events_1 = __webpack_require__(19);
+class GeminiService extends events_1.EventEmitter {
+    client;
+    isInitialized = false;
+    constructor() {
+        super();
+        this.client = new gemini_client_1.GeminiClient();
+    }
+    async initialize(apiKey) {
+        await this.client.initialize(apiKey);
+        this.isInitialized = true;
+    }
     async analyze(code, context) {
+        if (!this.isInitialized) {
+            const error = new Error("GeminiService not initialized. Please check your API key settings.");
+            this.emit('error', error);
+            throw error;
+        }
         this.emit('analysisStarted');
-        // Simulate progressive analysis with progress updates
-        await this.simulateProgressiveAnalysis();
-        const analysis = {
-            issues: this.generateMockIssues(context),
-            suggestions: this.generateMockSuggestions(),
-            riskLevel: this.calculateRiskLevel(context),
-            confidence: 0.87,
-            timestamp: new Date(),
-        };
-        this.currentAnalysis = analysis;
-        this.emit('analysisComplete', analysis);
-        return analysis;
+        try {
+            // Convert DeveloperContext to GeminiContext
+            // We map the rich DeveloperContext from the extension to the Gemini module's expected input
+            const geminiContext = context_builder_1.ContextBuilder.build({
+                gitLogs: context.git.recentCommits.map(c => `${c.hash.substring(0, 7)} - ${c.message}`),
+                gitDiff: "", // TODO: Get actual diff if available in context
+                openFiles: context.files.openFiles,
+                activeFile: context.files.activeFile,
+                errors: [], // TODO: Pass errors if available
+                editHistory: context.files.recentlyEdited.map(e => ({
+                    file: e.file,
+                    timestamp: e.timestamp.getTime()
+                }))
+            });
+            this.emit('analysisProgress', 20, 'Sending context to Gemini...');
+            const result = await this.client.analyzeCode(code, geminiContext);
+            this.emit('analysisProgress', 80, 'Processing results...');
+            const analysis = {
+                issues: result.issues.map((i, idx) => ({
+                    id: `issue-${idx}`,
+                    file: context.files.activeFile,
+                    line: i.line,
+                    column: 0,
+                    severity: i.severity || 'warning',
+                    message: i.message
+                })),
+                suggestions: result.suggestions.map(s => ({
+                    type: 'refactor',
+                    message: s
+                })),
+                riskLevel: result.risk_level || 'low',
+                confidence: 0.9, // Placeholder
+                timestamp: new Date()
+            };
+            this.emit('analysisComplete', analysis);
+            return analysis;
+        }
+        catch (error) {
+            console.error("GeminiService Analysis Error:", error);
+            this.emit('error', error);
+            throw error;
+        }
     }
     async generateTests(code) {
-        await this.delay(1500);
-        return `import { describe, it, expect } from 'vitest';
-import { analyzeCode } from './analyzer';
-
-describe('analyzeCode', () => {
-  it('should identify unused variables', () => {
-    const code = 'const unused = 42;';
-    const result = analyzeCode(code);
-    expect(result.issues).toHaveLength(1);
-    expect(result.issues[0].message).toContain('unused');
-  });
-
-  it('should detect potential null references', () => {
-    const code = 'user.name.toUpperCase();';
-    const result = analyzeCode(code);
-    expect(result.issues).toContain('null reference');
-  });
-
-  it('should suggest performance optimizations', () => {
-    const code = 'for (let i = 0; i < arr.length; i++)';
-    const result = analyzeCode(code);
-    expect(result.suggestions).toContain('cache length');
-  });
-});
-`;
+        if (!this.isInitialized) {
+            throw new Error("GeminiService not initialized");
+        }
+        return this.client.generateTests(code);
     }
     async fixError(code, error) {
-        await this.delay(1000);
+        if (!this.isInitialized) {
+            throw new Error("GeminiService not initialized");
+        }
+        const fix = await this.client.fixError(code, error);
         return {
-            fixedCode: code.replace('user.name', 'user?.name'),
-            explanation: 'Added optional chaining to prevent null reference error. This ensures the code safely handles cases where user or user.name might be null/undefined.',
-            diff: `- user.name.toUpperCase()
-+ user?.name?.toUpperCase()`,
+            fixedCode: fix.fixedCode,
+            explanation: "Fixed by Gemini AI",
+            diff: "" // Optional
         };
     }
     async explainCode(code) {
-        await this.delay(800);
-        return `This code implements a context collection service that gathers developer activity data from the VSCode workspace. 
-
-Key responsibilities:
-1. Monitors file edits and tracks edit frequency
-2. Collects git information (commits, branch, changes)
-3. Tracks cursor position and active files
-4. Identifies "risky" files with high edit counts
-
-The service uses an EventEmitter pattern to notify subscribers when new context is collected, making it easy to integrate with UI components that need real-time updates.`;
-    }
-    getIssuesByFile() {
-        if (!this.currentAnalysis) {
-            return [];
-        }
-        // Group issues by file for tree view
-        const fileMap = new Map();
-        for (const issue of this.currentAnalysis.issues) {
-            if (!fileMap.has(issue.file)) {
-                fileMap.set(issue.file, []);
-            }
-            fileMap.get(issue.file).push(issue);
-        }
-        return Array.from(fileMap.entries()).map(([file, issues]) => ({
-            file,
-            issueCount: issues.length,
-            issues,
-        }));
-    }
-    generateMockIssues(context) {
-        const issues = [
-            {
-                id: 'issue-1',
-                file: 'src/extension.ts',
-                line: 42,
-                column: 10,
-                severity: 'warning',
-                message: 'Unused variable "tempData" detected',
-                suggestedFix: 'Remove the unused variable declaration',
-                codeSnippet: '  const tempData = await fetchData();',
-            },
-            {
-                id: 'issue-2',
-                file: 'src/extension.ts',
-                line: 67,
-                column: 5,
-                severity: 'error',
-                message: 'Potential null reference: "user" may be null or undefined',
-                suggestedFix: 'Add null check: if (user) { ... } or use optional chaining: user?.name',
-                codeSnippet: '  return user.name.toUpperCase();',
-            },
-            {
-                id: 'issue-3',
-                file: 'src/extension.ts',
-                line: 89,
-                column: 1,
-                severity: 'info',
-                message: 'Function "handleAnalysis" is becoming too complex (cognitive complexity: 15)',
-                suggestedFix: 'Consider extracting into smaller functions',
-                codeSnippet: 'async function handleAnalysis() {',
-            },
-            {
-                id: 'issue-4',
-                file: 'src/services/mock/MockAIService.ts',
-                line: 23,
-                column: 8,
-                severity: 'info',
-                message: 'Consider using async/await instead of Promise.then()',
-                suggestedFix: 'Refactor to: const result = await fetchData();',
-                codeSnippet: '  fetchData().then(result => {',
-            },
-            {
-                id: 'issue-5',
-                file: 'src/ui/StatusBarManager.ts',
-                line: 15,
-                column: 3,
-                severity: 'warning',
-                message: 'Magic number: Consider extracting "5000" to a named constant',
-                suggestedFix: 'const NOTIFICATION_DURATION_MS = 5000;',
-                codeSnippet: '  setTimeout(() => reset(), 5000);',
-            },
-        ];
-        // Add extra issues for risky files
-        context.session.riskyFiles.forEach((file, index) => {
-            if (index > 0) { // Skip first one since we already have issues for it
-                issues.push({
-                    id: `issue-risky-${index}`,
-                    file,
-                    line: 1,
-                    column: 1,
-                    severity: 'warning',
-                    message: `High edit frequency detected (${context.files.editFrequency.get(file)} edits). Review for potential bugs.`,
-                    suggestedFix: 'Carefully review recent changes',
-                });
-            }
-        });
-        return issues;
-    }
-    generateMockSuggestions() {
-        return [
-            {
-                type: 'refactor',
-                message: 'Extract authentication logic into a separate AuthService class',
-                file: 'src/extension.ts',
-                line: 120,
-            },
-            {
-                type: 'performance',
-                message: 'Cache API responses to reduce redundant network calls',
-                file: 'src/services/mock/MockAIService.ts',
-                line: 45,
-            },
-            {
-                type: 'security',
-                message: 'API keys should be stored in environment variables, not hardcoded',
-            },
-            {
-                type: 'style',
-                message: 'Consider adding JSDoc comments to public methods for better documentation',
-            },
-        ];
-    }
-    calculateRiskLevel(context) {
-        const riskyFileCount = context.session.riskyFiles.length;
-        const totalEdits = context.session.totalEdits;
-        if (riskyFileCount >= 3 || totalEdits > 50) {
-            return 'high';
-        }
-        else if (riskyFileCount >= 1 || totalEdits > 20) {
-            return 'medium';
-        }
-        return 'low';
-    }
-    async simulateProgressiveAnalysis() {
-        const steps = [
-            { progress: 10, message: 'Collecting context...' },
-            { progress: 30, message: 'Analyzing code patterns...' },
-            { progress: 50, message: 'Checking for common issues...' },
-            { progress: 70, message: 'Generating suggestions...' },
-            { progress: 90, message: 'Finalizing analysis...' },
-        ];
-        for (const step of steps) {
-            await this.delay(400);
-            this.emit('analysisProgress', step.progress, step.message);
-        }
-    }
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+        // TODO: Implement explain code in client
+        return "Explanation not implemented yet";
     }
 }
-exports.MockAIService = MockAIService;
+exports.GeminiService = GeminiService;
 
 
 /***/ }),
-/* 22 */
+/* 21 */
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -2571,7 +2296,7 @@ exports.MockGitService = MockGitService;
 
 
 /***/ }),
-/* 23 */
+/* 22 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -2662,7 +2387,7 @@ exports.MockVoiceService = MockVoiceService;
 
 
 /***/ }),
-/* 24 */
+/* 23 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -2763,7 +2488,7 @@ exports.StatusBarManager = StatusBarManager;
 
 
 /***/ }),
-/* 25 */
+/* 24 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -2808,7 +2533,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SidebarWebviewProvider = void 0;
-const path = __importStar(__webpack_require__(26));
+const path = __importStar(__webpack_require__(25));
 const fs = __importStar(__webpack_require__(6));
 class SidebarWebviewProvider {
     extensionUri;
@@ -2895,14 +2620,14 @@ exports.SidebarWebviewProvider = SidebarWebviewProvider;
 
 
 /***/ }),
-/* 26 */
+/* 25 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("path");
 
 /***/ }),
-/* 27 */
+/* 26 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -3092,7 +2817,7 @@ class IssueTreeItem extends vscode.TreeItem {
 
 
 /***/ }),
-/* 28 */
+/* 27 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -3220,6 +2945,464 @@ class NotificationManager {
     }
 }
 exports.NotificationManager = NotificationManager;
+
+
+/***/ }),
+/* 28 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FileWatcher = void 0;
+const vscode = __importStar(__webpack_require__(1));
+class FileWatcher {
+    watcher = null;
+    disposables = [];
+    lintingEndpoint;
+    constructor(lintingEndpoint = "https://your-worker.workers.dev/lint") {
+        this.lintingEndpoint = lintingEndpoint;
+    }
+    /**
+     * Start watching files in the workspace
+     */
+    start() {
+        console.log("[FileWatcher] Starting file monitoring...");
+        // Method 1: Watch specific file patterns (glob patterns)
+        // This creates a watcher for TypeScript and JavaScript files
+        this.watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,js,tsx,jsx}", // Watch these file types
+        false, // Don't ignore creates
+        false, // Don't ignore changes
+        false // Don't ignore deletes
+        );
+        // React to file creation
+        this.watcher.onDidCreate((uri) => {
+            console.log(`[FileWatcher] File created: ${uri.fsPath}`);
+            vscode.window.showInformationMessage(`📄 New file: ${uri.fsPath}`);
+        });
+        // React to file changes
+        this.watcher.onDidChange((uri) => {
+            console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
+        });
+        // React to file deletion
+        this.watcher.onDidDelete((uri) => {
+            console.log(`[FileWatcher] File deleted: ${uri.fsPath}`);
+        });
+        // Method 2: Watch for document saves (best for auto-linting)
+        const saveWatcher = vscode.workspace.onDidSaveTextDocument(async (document) => {
+            await this.onFileSaved(document);
+        });
+        // Method 3: Watch for any text document changes (real-time)
+        const changeWatcher = vscode.workspace.onDidChangeTextDocument((event) => {
+            // Only process if there are actual content changes
+            if (event.contentChanges.length > 0) {
+                console.log(`[FileWatcher] Document modified: ${event.document.fileName}`);
+            }
+        });
+        this.disposables.push(saveWatcher, changeWatcher);
+    }
+    /**
+     * Handle file save event - auto-lint the file
+     */
+    async onFileSaved(document) {
+        // Only process certain file types
+        const validExtensions = [".ts", ".js", ".tsx", ".jsx"];
+        const fileExt = document.fileName.substring(document.fileName.lastIndexOf("."));
+        if (!validExtensions.includes(fileExt)) {
+            return; // Skip non-code files
+        }
+        console.log(`[FileWatcher] Auto-linting: ${document.fileName}`);
+        try {
+            const code = document.getText();
+            // Call your Cloudflare worker to lint the code
+            const response = await fetch(this.lintingEndpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code }),
+            });
+            if (!response.ok) {
+                throw new Error(`Linting failed: ${response.statusText}`);
+            }
+            const result = await response.json();
+            // Show results to user
+            if (result.warnings && result.warnings.length > 0) {
+                const message = `⚠️ ${result.warnings.length} issue(s) found in ${document.fileName}`;
+                vscode.window.showWarningMessage(message);
+                // Optionally show detailed warnings in output channel
+                const outputChannel = vscode.window.createOutputChannel("Auto-Linter");
+                outputChannel.clear();
+                outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===\n`);
+                result.warnings.forEach((warning) => {
+                    outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
+                });
+                outputChannel.show();
+            }
+            else {
+                vscode.window.showInformationMessage(`✅ No issues found in ${document.fileName}`);
+            }
+            // If linting produced a fixed version, optionally apply it
+            if (result.linted && result.fixed !== code) {
+                const applyFix = await vscode.window.showInformationMessage("Apply auto-fix?", "Yes", "No");
+                if (applyFix === "Yes") {
+                    await this.applyFix(document, result.fixed);
+                }
+            }
+        }
+        catch (error) {
+            console.error("[FileWatcher] Linting error:", error);
+            vscode.window.showErrorMessage(`Linting failed: ${error}`);
+        }
+    }
+    /**
+     * Apply the fixed code to the document
+     */
+    async applyFix(document, fixedCode) {
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+        edit.replace(document.uri, fullRange, fixedCode);
+        await vscode.workspace.applyEdit(edit);
+        await document.save();
+        vscode.window.showInformationMessage("✅ Auto-fix applied!");
+    }
+    /**
+     * Stop watching files and clean up
+     */
+    stop() {
+        if (this.watcher) {
+            this.watcher.dispose();
+            this.watcher = null;
+        }
+        this.disposables.forEach((d) => d.dispose());
+        this.disposables = [];
+        console.log("[FileWatcher] Stopped file monitoring");
+    }
+}
+exports.FileWatcher = FileWatcher;
+
+
+/***/ }),
+/* 29 */
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.GeminiClient = void 0;
+const prompts_1 = __webpack_require__(30);
+class GeminiClient {
+    apiKey = "";
+    model = "gemini-2.0-flash";
+    ready = false;
+    async initialize(apiKey) {
+        this.apiKey = apiKey;
+        this.ready = true;
+    }
+    isReady() {
+        return this.ready;
+    }
+    enableMockMode() {
+        this.model = "mock";
+    }
+    async analyzeCode(code, context) {
+        if (!this.ready) {
+            throw new Error("GeminiClient not initialized");
+        }
+        if (this.model === "mock") {
+            return {
+                issues: [
+                    { line: 1, severity: "warning", message: "Mock issue: Variable might be undefined" }
+                ],
+                suggestions: ["Add a null check"],
+                risk_level: "low",
+                summary: "Mock analysis result"
+            };
+        }
+        const prompt = prompts_1.PromptTemplates.codeAnalysis(code, context);
+        try {
+            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return this.parseAnalysis(data);
+        }
+        catch (error) {
+            console.error("Gemini analysis failed:", error);
+            throw error;
+        }
+    }
+    async fetchWithRetry(url, options, retries = 3) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await fetch(url, options);
+                if (response.ok) {
+                    return response;
+                }
+                console.warn(`Gemini API attempt ${i + 1} failed: ${response.status} ${response.statusText}`);
+                // If 429 (Too Many Requests) or 5xx, retry
+                if (response.status === 429 || response.status >= 500) {
+                    const delay = Math.pow(2, i) * 1000; // Exponential backoff
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                return response;
+            }
+            catch (error) {
+                console.warn(`Gemini API network error attempt ${i + 1}:`, error);
+                if (i === retries - 1) {
+                    throw error;
+                }
+                const delay = Math.pow(2, i) * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        throw new Error("Max retries exceeded");
+    }
+    parseAnalysis(data) {
+        try {
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            // Robust JSON extraction: find the first '{' and the last '}'
+            const firstBrace = text.indexOf('{');
+            const lastBrace = text.lastIndexOf('}');
+            if (firstBrace === -1 || lastBrace === -1) {
+                throw new Error("No JSON object found in response");
+            }
+            const jsonStr = text.substring(firstBrace, lastBrace + 1);
+            const parsed = JSON.parse(jsonStr);
+            return {
+                issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+                suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+                risk_level: parsed.risk_level || 'low',
+                summary: parsed.summary
+            };
+        }
+        catch (e) {
+            console.warn("Failed to parse Gemini response:", e);
+            console.warn("Raw response text:", data.candidates?.[0]?.content?.parts?.[0]?.text);
+            // Fallback
+            return {
+                issues: [],
+                suggestions: ["Failed to parse AI response. Please try again."],
+                risk_level: 'low',
+                summary: "Error parsing AI response."
+            };
+        }
+    }
+    async generateTests(functionCode) {
+        if (!this.ready) {
+            throw new Error("GeminiClient not initialized");
+        }
+        if (this.model === "mock") {
+            return `
+describe('generatedTest', () => {
+  it('should work', () => {
+    expect(true).toBe(true);
+  });
+});`;
+        }
+        const prompt = prompts_1.PromptTemplates.testGeneration(functionCode);
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+            })
+        });
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return text;
+    }
+    async fixError(code, error) {
+        if (!this.ready) {
+            throw new Error("GeminiClient not initialized");
+        }
+        if (this.model === "mock") {
+            return {
+                fixedCode: code + "\n// Fixed by mock",
+                confidence: 0.9
+            };
+        }
+        const prompt = prompts_1.PromptTemplates.errorFix(code, error);
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }]
+            })
+        });
+        const data = await response.json();
+        const fixedCode = data.candidates?.[0]?.content?.parts?.[0]?.text || code;
+        return {
+            fixedCode,
+            confidence: 0.85
+        };
+    }
+}
+exports.GeminiClient = GeminiClient;
+
+
+/***/ }),
+/* 30 */
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.PromptTemplates = void 0;
+class PromptTemplates {
+    static codeAnalysis(code, context) {
+        const relatedFilesStr = context.relatedFiles.length > 0
+            ? context.relatedFiles.join(", ")
+            : "None";
+        const commitsStr = context.recentCommits.length > 0
+            ? context.recentCommits.join("\n- ")
+            : "None";
+        const errorsStr = context.recentErrors.length > 0
+            ? context.recentErrors.join("\n- ")
+            : "None";
+        return `
+You are an expert AI coding assistant. Your task is to analyze the provided code within the context of the user's current workflow.
+
+CONTEXT:
+- Active File: ${context.activeFile || "Unknown"}
+- Related Open Files: ${relatedFilesStr}
+- Recent Git Commits:
+- ${commitsStr}
+- Recent Workspace Errors:
+- ${errorsStr}
+- Edit Frequency: ${context.editCount} edits in session
+
+GIT DIFF SUMMARY (Recent changes):
+${context.gitDiffSummary}
+
+CODE TO ANALYZE:
+\`\`\`
+${code}
+\`\`\`
+
+INSTRUCTIONS:
+Analyze the code for:
+1.  **Correctness**: Logic errors, bugs, potential runtime issues.
+2.  **Quality**: Code smells, maintainability, readability.
+3.  **Contextual Relevance**: Does this code align with the recent commits and changes?
+4.  **Security**: Potential vulnerabilities.
+
+Respond in valid JSON format ONLY:
+{
+  "issues": [
+    { "line": number, "severity": "error"|"warning"|"info", "message": "string" }
+  ],
+  "suggestions": ["string"],
+  "risk_level": "low"|"medium"|"high",
+  "summary": "Brief summary of what the user seems to be working on based on this code and context",
+  "context_analysis": "Analysis of how this code fits into the broader project context"
+}
+    `.trim();
+    }
+    static testGeneration(functionCode) {
+        return `
+Generate comprehensive unit tests for the following function using Vitest.
+Include imports, describe blocks, and it blocks covering happy paths and edge cases.
+
+Code:
+\`\`\`
+${functionCode}
+\`\`\`
+    `.trim();
+    }
+    static errorFix(code, error) {
+        return `
+Fix the following error in the code. Return ONLY the fixed code block without markdown formatting if possible, or inside a single code block.
+
+Error:
+${error}
+
+Code:
+\`\`\`
+${code}
+\`\`\`
+    `.trim();
+    }
+}
+exports.PromptTemplates = PromptTemplates;
+
+
+/***/ }),
+/* 31 */
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ContextBuilder = void 0;
+class ContextBuilder {
+    static build(raw) {
+        const { gitLogs = [], gitDiff = "", openFiles = [], activeFile = null, errors = [], editHistory = [], fileContents = new Map() } = raw;
+        // 1. Identify related files based on active file
+        // Simple heuristic: same directory or imported (mock logic for imports)
+        const relatedFiles = openFiles.filter(f => f !== activeFile);
+        // 2. Summarize Git Diff (don't just truncate, maybe prioritize modified files)
+        let diffSummary = gitDiff || "";
+        if (diffSummary.length > 8000) {
+            diffSummary = diffSummary.substring(0, 8000) + "\n... [truncated]";
+        }
+        // 3. Build open file contents map for context
+        const openFileContents = new Map();
+        if (activeFile && fileContents.has(activeFile)) {
+            openFileContents.set(activeFile, fileContents.get(activeFile));
+        }
+        // Add other open files if small enough? For now just active.
+        return {
+            activeFile: activeFile || null,
+            recentCommits: gitLogs.slice(0, 10), // Increased context
+            recentErrors: errors.slice(0, 5),
+            gitDiffSummary: diffSummary,
+            editCount: editHistory.length,
+            relatedFiles: relatedFiles,
+            openFileContents: openFileContents
+        };
+    }
+}
+exports.ContextBuilder = ContextBuilder;
 
 
 /***/ })

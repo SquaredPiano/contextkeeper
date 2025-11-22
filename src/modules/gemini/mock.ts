@@ -1,10 +1,5 @@
 import { GeminiModule } from './index';
-
-interface Analysis {
-  issues: Array<{ line: number; severity: string; message: string }>;
-  suggestions: string[];
-  risk_level: string;
-}
+import { Analysis, CodeFix } from './types';
 
 export class MockGemini implements GeminiModule {
   async initialize(apiKey: string): Promise<void> {
@@ -44,7 +39,7 @@ describe('calculateTotal', () => {
     `.trim();
   }
 
-  async fixError(code: string, error: string): Promise<{ fixedCode: string; confidence: number }> {
+  async fixError(code: string, error: string): Promise<CodeFix> {
     return {
       fixedCode: code,
       confidence: 0.8
