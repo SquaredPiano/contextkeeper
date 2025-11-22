@@ -1,11 +1,10 @@
 import * as vscode from 'vscode';
-import { IAIService, IVoiceService, DeveloperContext, AIAnalysis, ExtensionState } from '../services/interfaces';
+import { IAIService, IVoiceService, IStorageService, DeveloperContext, AIAnalysis, ExtensionState } from '../services/interfaces';
 import { ContextService } from '../services/real/ContextService';
 import { NotificationManager } from '../ui/NotificationManager';
 import { SidebarWebviewProvider } from '../ui/SidebarWebviewProvider';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { IssuesTreeProvider } from '../ui/IssuesTreeProvider';
-import { storage } from '../services/storage';
 import { getLogsWithGitlog } from '../modules/gitlogs/gitlog';
 import { FileWatcher } from '../modules/gitlogs/fileWatcher';
 
@@ -17,7 +16,8 @@ export class CommandManager {
     private voiceService: IVoiceService,
     private sidebarProvider: SidebarWebviewProvider,
     private statusBar: StatusBarManager,
-    private issuesTreeProvider: IssuesTreeProvider
+    private issuesTreeProvider: IssuesTreeProvider,
+    private storageService: IStorageService
   ) { }
 
   public registerCommands() {
@@ -105,13 +105,13 @@ export class CommandManager {
     this.context.subscriptions.push(
       vscode.commands.registerCommand("contextkeeper.showStoredEvents", async () => {
         try {
-          const events = await storage.getRecentEvents(20);
+          const events = await this.storageService.getRecentEvents(100);
           const channel = vscode.window.createOutputChannel("ContextKeeper Storage");
           channel.clear();
           channel.appendLine("=== Recent Stored Events (LanceDB) ===");
 
           if (events.length === 0) {
-            channel.appendLine("No events found.");
+            channel.appendLine("No events found. Try editing some files first!");
           }
 
           events.forEach((event, i) => {
@@ -121,8 +121,44 @@ export class CommandManager {
           });
 
           channel.show();
+          vscode.window.showInformationMessage(`Found ${events.length} stored events in LanceDB`);
         } catch (error: any) {
           vscode.window.showErrorMessage(`Failed to fetch events: ${error.message}`);
+          console.error('Error fetching events:', error);
+        }
+      })
+    );
+
+    // Command to show stored actions (with embeddings for vector search)
+    this.context.subscriptions.push(
+      vscode.commands.registerCommand("contextkeeper.showStoredActions", async () => {
+        try {
+          const actions = await this.storageService.getRecentActions(50);
+          const channel = vscode.window.createOutputChannel("ContextKeeper Actions");
+          channel.clear();
+          channel.appendLine("=== Recent Stored Actions (Vector Searchable) ===");
+          channel.appendLine("These are the actions that get embeddings for RAG/context retrieval\n");
+
+          if (actions.length === 0) {
+            channel.appendLine("No actions found. Try editing some files first!");
+          }
+
+          actions.forEach((action, i) => {
+            channel.appendLine(`\n[${i + 1}] ${new Date(action.timestamp).toLocaleString()}`);
+            channel.appendLine(`    Description: ${action.description}`);
+            channel.appendLine(`    Session: ${action.session_id}`);
+            channel.appendLine(`    Files: ${action.files}`);
+            channel.appendLine(`    Has Embedding: ${action.embedding ? 'YES (' + (Array.isArray(action.embedding) ? action.embedding.length : 'object') + ')' : 'NO'}`);
+            if (action.diff && action.diff.length < 500) {
+              channel.appendLine(`    Diff: ${action.diff}`);
+            }
+          });
+
+          channel.show();
+          vscode.window.showInformationMessage(`Found ${actions.length} stored actions with embeddings`);
+        } catch (error: any) {
+          vscode.window.showErrorMessage(`Failed to fetch actions: ${error.message}`);
+          console.error('Error fetching actions:', error);
         }
       })
     );

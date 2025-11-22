@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
+import * as cp from 'child_process';
+import * as util from 'util';
+
+const exec = util.promisify(cp.exec);
 import { GitService } from '../../modules/gitlogs/GitService';
 
 export interface GitCommitEvent {

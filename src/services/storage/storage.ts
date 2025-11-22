@@ -210,9 +210,11 @@ export class LanceDBStorage implements IStorageService {
       }
     }
 
+    // Fetch more than we need to ensure we get enough after filtering
+    // LanceDB might have init records or other non-relevant data
     const results = await this.eventsTable
       .query()
-      .limit(limit * 2)
+      .limit(Math.max(limit * 3, 500)) // Fetch generously
       .toArray();
 
     // Sort by timestamp descending
@@ -221,7 +223,14 @@ export class LanceDBStorage implements IStorageService {
       const eventB = b as EventRecord;
       return eventB.timestamp - eventA.timestamp;
     });
-    return sorted.slice(0, limit) as EventRecord[];
+    
+    // Filter out init/placeholder events (timestamp 0)
+    const filtered = sorted.filter((e: unknown) => {
+      const event = e as EventRecord;
+      return event.timestamp > 0 && event.file_path !== '/init';
+    });
+    
+    return filtered.slice(0, limit) as EventRecord[];
   }
 
   async getRecentActions(limit: number = 10): Promise<ActionRecord[]> {

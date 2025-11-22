@@ -1,7 +1,7 @@
 export interface EventRecord {
   id: string;
   timestamp: number;
-  event_type: 'file_open' | 'file_edit' | 'file_close' | 'git_commit' | 'function_edit';
+  event_type: 'file_open' | 'file_edit' | 'file_close' | 'git_commit' | 'function_edit' | 'file_focus';
   file_path: string;
   metadata: string; // JSON stringified object
 }

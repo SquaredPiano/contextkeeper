@@ -73,7 +73,12 @@ export class ContextIngestionService {
       this.logToOutput(`❌ Failed to setup listeners: ${errorMsg}`);
     }
 
-    // 3. Ensure Storage is Connected
+    // 3. Capture initial state
+    if (vscode.window.activeTextEditor) {
+      this.handleFileOpen(vscode.window.activeTextEditor.document);
+    }
+
+    // 4. Ensure Storage is Connected
     try {
       // await this.storage.connect(); // Assuming connection is handled externally
       console.log('[ContextIngestionService] Storage connected for ingestion.');
@@ -96,13 +101,18 @@ export class ContextIngestionService {
   }
 
   private setupListeners(): void {
-    // File Open (Active Editor Change)
+    // File Open (Active Editor Change) -> Treat as Focus
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(editor => {
         if (editor) {
-          this.handleFileOpen(editor.document);
+          this.handleFileFocus(editor.document);
         }
       })
+    );
+
+    // File Open (Actual Open)
+    this.disposables.push(
+      vscode.workspace.onDidOpenTextDocument(doc => this.handleFileOpen(doc))
     );
 
     // File Close
@@ -114,6 +124,28 @@ export class ContextIngestionService {
     this.disposables.push(
       vscode.workspace.onDidChangeTextDocument(event => this.handleFileEdit(event))
     );
+  }
+
+  private async handleFileFocus(document: vscode.TextDocument): Promise<void> {
+    if (this.shouldIgnoreFile(document.uri)) { return; }
+
+    try {
+      this.queue.enqueue({
+        type: 'event',
+        data: {
+          timestamp: Date.now(),
+          event_type: 'file_focus',
+          file_path: vscode.workspace.asRelativePath(document.uri),
+          metadata: JSON.stringify({
+            languageId: document.languageId,
+            lineCount: document.lineCount
+          })
+        }
+      });
+      this.logToOutput(`[FILE_FOCUS] ${vscode.workspace.asRelativePath(document.uri)}`);
+    } catch (error) {
+      console.error('Error logging file_focus:', error);
+    }
   }
 
   private async handleFileOpen(document: vscode.TextDocument): Promise<void> {
@@ -189,26 +221,64 @@ export class ContextIngestionService {
 
   private async processFileEdit(document: vscode.TextDocument, changes: readonly vscode.TextDocumentContentChangeEvent[]): Promise<void> {
     try {
-      // Calculate a rough "diff" or summary of changes
-      const changeSummary = changes.map(c => ({
-        range: c.range,
-        textLength: c.text.length,
-        textPreview: c.text.substring(0, 50).replace(/\n/g, '\\n')
-      }));
-
       const relativePath = vscode.workspace.asRelativePath(document.uri);
 
       // Identify function context
-      let functionName: string | undefined;
+      const affectedFunctions = new Set<string>();
       try {
         const symbols = await getDocumentSymbols(document.uri);
-        // Check the first change to see if it falls within a function
-        if (changes.length > 0) {
-            functionName = findFunctionAtPosition(symbols, changes[0].range.start);
+        console.log(`[ContextIngestion] Found ${symbols.length} symbols in ${relativePath}`);
+        for (const change of changes) {
+            const func = findFunctionAtPosition(symbols, change.range.start);
+            if (func) {
+                affectedFunctions.add(func);
+                console.log(`[ContextIngestion] Edit at line ${change.range.start.line} affects function: ${func}`);
+            }
+        }
+        if (affectedFunctions.size === 0) {
+          console.log(`[ContextIngestion] No function context found for edit at line ${changes[0]?.range.start.line}`);
         }
       } catch (e) {
-        // Ignore symbol errors during edit processing
+        console.warn('[ContextIngestion] Symbol detection failed:', e);
       }
+
+      const affectedFunctionsList = Array.from(affectedFunctions);
+
+      // Calculate a rough "diff" or summary of changes with actual code context
+      const changeSummary = changes.map(c => {
+        const startLine = c.range.start.line;
+        const endLine = c.range.end.line;
+        const textPreview = c.text.substring(0, 200).replace(/\n/g, '\\n');
+        
+        // Get surrounding context (3 lines before and after)
+        let contextBefore = '';
+        let contextAfter = '';
+        try {
+          const lineCount = document.lineCount;
+          if (startLine > 0) {
+            const beforeStart = Math.max(0, startLine - 3);
+            contextBefore = document.getText(new vscode.Range(beforeStart, 0, startLine, 0));
+          }
+          if (endLine < lineCount - 1) {
+            const afterEnd = Math.min(lineCount - 1, endLine + 3);
+            contextAfter = document.getText(new vscode.Range(endLine + 1, 0, afterEnd + 1, 0));
+          }
+        } catch (e) {
+          // Ignore context extraction errors
+        }
+
+        return {
+          range: { 
+            start: { line: startLine + 1, char: c.range.start.character + 1 },  // Convert to 1-based
+            end: { line: endLine + 1, char: c.range.end.character + 1 }          // Convert to 1-based
+          },
+          textLength: c.text.length,
+          textPreview,
+          contextBefore: contextBefore.substring(0, 200),
+          contextAfter: contextAfter.substring(0, 200),
+          rangeText: c.rangeLength > 0 ? document.getText(c.range).substring(0, 100) : ''
+        };
+      });
 
       // 1. Log raw event for history
       this.queue.enqueue({
@@ -221,16 +291,39 @@ export class ContextIngestionService {
             languageId: document.languageId,
             changeCount: changes.length,
             changes: changeSummary,
-            function: functionName
+            affectedFunctions: affectedFunctionsList
           })
         }
       });
 
+      console.log(`[ContextIngestion] Stored event with ${changeSummary.length} changes at line ${changeSummary[0]?.range.start.line} (1-based)`);
+
       // 2. Log Action for Vector Search (Searchable Context)
-      // We create a natural language description of what happened
-      let description = `User edited ${relativePath} (${document.languageId}). Changed ${changes.length} sections.`;
-      if (functionName) {
-          description += ` Modified function: ${functionName}.`;
+      // Create a rich natural language description of what happened
+      let description = `User edited ${relativePath}`;
+      
+      if (affectedFunctionsList.length > 0) {
+          description += ` in function(s): ${affectedFunctionsList.join(', ')}`;
+      }
+      
+      // Add details about the type of changes
+      const totalCharsAdded = changes.reduce((sum, c) => sum + c.text.length, 0);
+      const totalCharsRemoved = changes.reduce((sum, c) => sum + c.rangeLength, 0);
+      
+      if (totalCharsAdded > 0 && totalCharsRemoved === 0) {
+          description += `. Added ${totalCharsAdded} characters`;
+      } else if (totalCharsRemoved > 0 && totalCharsAdded === 0) {
+          description += `. Removed ${totalCharsRemoved} characters`;
+      } else if (totalCharsAdded > 0 && totalCharsRemoved > 0) {
+          description += `. Modified code (added ${totalCharsAdded}, removed ${totalCharsRemoved} chars)`;
+      }
+      
+      // Add a snippet of what was changed for better vector search
+      if (changes.length > 0 && changes[0].text.length > 0 && changes[0].text.length < 100) {
+          const snippet = changes[0].text.replace(/\n/g, ' ').trim();
+          if (snippet) {
+              description += `. Change: "${snippet}"`;
+          }
       }
 
       this.queue.enqueue({
@@ -239,13 +332,15 @@ export class ContextIngestionService {
           session_id: this.sessionManager.getSessionId(),
           timestamp: Date.now(),
           description: description,
-          diff: JSON.stringify(changeSummary), // Store diff summary for now
+          diff: JSON.stringify(changeSummary),
           files: JSON.stringify([relativePath])
         }
       });
 
-      this.logToOutput(`[FILE_EDIT] ${relativePath} (${changes.length} changes)${functionName ? ` in ${functionName}` : ''}`);
-      console.log(`[ContextIngestionService] File edited: ${relativePath} (${changes.length} changes)${functionName ? ` in ${functionName}` : ''}`);
+      console.log(`[ContextIngestion] Queued action for embedding: "${description.substring(0, 100)}..."`);
+
+      this.logToOutput(`[FILE_EDIT] ${relativePath} (${changes.length} changes)${affectedFunctionsList.length > 0 ? ` in ${affectedFunctionsList.join(', ')}` : ''}`);
+      console.log(`[ContextIngestionService] File edited: ${relativePath} (${changes.length} changes)${affectedFunctionsList.length > 0 ? ` in ${affectedFunctionsList.join(', ')}` : ''}`);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       console.error(`[ContextIngestionService] Error logging file_edit: ${errorMsg}`, error);

@@ -26,6 +26,8 @@ class MockAIService extends EventEmitter implements IAIService {
     async generateTests(code: string): Promise<string> { return ''; }
     async fixError(code: string, error: string): Promise<any> { return {}; }
     async explainCode(code: string): Promise<string> { return ''; }
+    async summarize(text: string): Promise<string> { return 'Mock summary'; }
+    async plan(goal: string, context: DeveloperContext): Promise<string> { return 'Mock plan'; }
 }
 
 class MockContextService extends EventEmitter implements IContextService {

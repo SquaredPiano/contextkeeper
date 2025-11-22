@@ -94,6 +94,11 @@
         "command": "contextkeeper.showStoredEvents",
         "title": "ContextKeeper: Show Stored Events (Debug)",
         "category": "ContextKeeper"
+      },
+      {
+        "command": "contextkeeper.showStoredActions",
+        "title": "ContextKeeper: Show Stored Actions (Vector Search)",
+        "category": "ContextKeeper"
       }
     ],
     "configuration": {

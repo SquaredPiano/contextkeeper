@@ -3,91 +3,186 @@
 ## 1. High-Level Overview
 **ContextKeeper** is an autonomous coding assistant designed to operate within the VS Code environment. Unlike traditional "autocomplete" copilots, ContextKeeper functions as an active collaborator that maintains a persistent understanding of the development session.
 
-The system is architected around a **Hybrid Compute Model**, balancing local responsiveness (VS Code Extension Host) with remote capability (Cloudflare Workers, Gemini 1.5 Pro).
+The system is architected around a **Hybrid Compute Model**, balancing local responsiveness (VS Code Extension Host) with remote capability (Cloudflare Workers for linting, Gemini 1.5 Pro for AI reasoning).
 
 ### Core Data Flow
-```mermaid
-[VS Code Events] -> [Ingestion Service] -> [Vector Store (LanceDB)]
-                                      |
-                                      v
-[User/Timer] -> [Orchestrator] -> [Context Builder] -> [Hybrid Analysis] -> [Action Execution]
+```
+[VS Code Events] -> [IngestionService] -> [IngestionQueue] -> [LanceDB with Embeddings]
+                                                                        |
+                                                                        v
+[Idle Detection] -> [AutonomousAgent] -> [ContextBuilder + RAG] -> [Gemini Analysis] -> [Action Execution]
+                                       |
+                                       +-> [CloudflareService (Linting)]
 ```
 
 ---
 
 ## 2. Architectural Principles
 
-### 2.1. The "Thin Path" & End-to-End Latency
-The architecture prioritizes the speed of the "Context-to-Action" loop. We avoid heavy local processing.
-*   **Ingestion**: Asynchronous and non-blocking.
-*   **Analysis**: Offloaded to Cloudflare (Linting) and Gemini (Reasoning).
-*   **Execution**: Local `WorkspaceEdit` operations for atomicity and undo support.
+### 2.1. Real-Time Event Ingestion with Embeddings
+- **Debounced Capture**: File edits are debounced (2s) to capture "thought pauses" rather than keystrokes
+- **Async Vectorization**: Events are queued via `IngestionQueue` and processed with Gemini embeddings asynchronously
+- **Non-Blocking**: UI thread remains responsive; all I/O is async
 
-### 2.2. Safety & Verification
-Autonomous agents must be trustworthy. We implement a **"Trust but Verify"** strategy:
-1.  **Deterministic Guardrails**: Static analysis (Cloudflare/ESLint) runs *before* and *alongside* probabilistic AI models.
-2.  **Sandboxed Execution**: Autonomous changes are applied to dedicated `copilot/*` git branches, never directly to `main`.
-3.  **Human-in-the-Loop**: High-risk changes (detected by heuristic analysis) require explicit user approval via the `prompt` action type.
+### 2.2. RAG-Based Context Retrieval
+- **Vector Search**: Uses LanceDB vector similarity search to find relevant past sessions and actions
+- **ContextBuilder**: Enhances current context with semantically similar historical work
+- **Smart Context Assembly**: Dynamically builds prompt context based on the active task
 
-### 2.3. State Persistence
-Context is temporal. The `SessionManager` maintains a session ID that links ephemeral IDE events (scrolls, edits) with persistent vector embeddings. This allows the system to recover context after a window reload.
+### 2.3. Idle-Triggered Autonomy
+- **Idle Detection**: Monitors user activity (15s threshold for demo, configurable)
+- **Branch Isolation**: Creates temporary `copilot/*` branches for autonomous work
+- **Dual-Phase Execution**:
+  1. **Phase 1**: Cloudflare linting (deterministic, fast)
+  2. **Phase 2**: Gemini test generation (probabilistic, creative)
+
+### 2.4. Safety & Verification
+- **Sandboxed Execution**: All autonomous changes happen on isolated git branches
+- **Fallback Mechanisms**: Local linting fallback if Cloudflare worker unavailable
+- **Error Handling**: Services fail gracefully with informative error messages
 
 ---
 
 ## 3. Component Deep Dive
 
-### 3.1. Composition Root (`extension.ts`)
-*   **Role**: Handles the VS Code Extension Lifecycle and Dependency Injection.
-*   **Design**: Acts as the "Switchboard". It instantiates services based on configuration (Real vs. Mock) and wires event listeners.
-*   **Constraint**: Currently monolithic to simplify shared state management. Future refactoring should introduce a proper DI container if service complexity grows.
+### 3.1. Extension Activation (`extension.ts`)
+- **Async Initialization**: Proper async/await for service initialization sequence
+- **Service Initialization Order**:
+  1. GeminiService (for embeddings and AI)
+  2. LanceDBStorage (connected with GeminiService)
+  3. ContextService, SessionManager
+  4. IngestionService (starts capturing events)
+  5. IdleService (monitors user activity)
+  6. AutonomousAgent (ready to execute tasks)
 
 ### 3.2. The Ingestion Layer (`ContextIngestionService.ts`)
-*   **Role**: Filters and normalizes the "Firehose" of IDE events.
-*   **Key Logic**:
-    *   **Debouncing**: `onDidChangeTextDocument` events are debounced (2s) to capture "thought pauses" rather than keystrokes.
-    *   **Vectorization**: Significant events are queued for embedding into LanceDB via `IngestionQueue`, ensuring the UI thread remains unblocked.
-    *   **Git Awareness**: Listens to local git operations to understand external context changes.
+- **Event Filtering**: Ignores system files, node_modules, build directories
+- **Dual Recording**:
+  - Raw events (file_open, file_edit, file_close, git_commit)
+  - Searchable actions (natural language descriptions with embeddings)
+- **Symbol-Aware**: Extracts function context for edits using VS Code's symbol provider
+- **Git Integration**: Watches git commits via `GitWatcher`
 
-### 3.3. The Orchestrator (`Orchestrator.ts`)
-*   **Role**: The central decision engine for analysis and action.
-*   **Key Logic**:
-    *   **Context Selection**: Dynamically assembles the prompt context (`CollectedContext`) based on the active task. It does *not* dump the entire repo into the context window.
-    *   **Batch Processing**: Aggregates file analysis requests to minimize network round-trips to the AI provider.
-    *   **Smart Override**: Implements the logic to upgrade `prompt` actions to `auto-fix` if the AI's confidence and risk assessment meet strict criteria (Low Risk + High Confidence).
+### 3.3. Storage Layer (`LanceDBStorage`)
+- **Three Tables**:
+  - `events`: Raw event log (timestamp, type, file, metadata)
+  - `sessions`: Work session summaries with embeddings
+  - `actions`: High-level actions with embeddings for RAG
+- **Embedding Generation**: Uses Gemini's `text-embedding-004` model (768-dim vectors)
+- **Vector Search**: LanceDB's native `vectorSearch()` for similarity queries
 
-### 3.4. The Autonomous Agent (`AutonomousAgent.ts`)
-*   **Role**: A state machine that executes multi-step tasks.
-*   **Workflow**:
-    1.  **Plan**: Queries Gemini for a high-level plan based on the current `DeveloperContext`.
-    2.  **Isolate**: Creates a temporary git branch.
-    3.  **Execute**: Runs the `Orchestrator` pipeline or specific tasks (`auto-lint`, `generate-tests`).
-    4.  **Commit**: Commits changes with semantic messages.
+### 3.4. Context Builder (`context-builder.ts`)
+- **RAG Integration**: Queries vector DB for relevant past sessions
+- **Context Enhancement**: Adds historical context to current work context
+- **Smart Summarization**: Uses Gemini to generate natural language summaries
 
-### 3.5. External Services
-*   **Cloudflare Service**: specialized for low-latency, deterministic code analysis (Linting, AST parsing).
-*   **Gemini Service**: specialized for high-latency, probabilistic reasoning and code generation. Enforces JSON output schemas for reliability.
+### 3.5. Idle Detection (`IdleService`)
+- **Activity Monitoring**: Tracks text changes, cursor moves, file opens
+- **Configurable Threshold**: Default 15s for demo (production could be 5+ minutes)
+- **Callback Pattern**: Registers callback to trigger autonomous agent
+
+### 3.6. Autonomous Agent (`AutonomousAgent.ts`)
+- **Task Registry**: Pluggable task system (auto-lint, auto-fix, generate-tests)
+- **Git Branch Isolation**: Creates timestamped `copilot/*` branches
+- **Sequential Execution**:
+  1. Cloudflare linting with automatic commit
+  2. Test generation with separate commit
+- **Error Handling**: Shows user-friendly error messages
+
+### 3.7. External Services
+- **CloudflareService**: Fast deterministic linting with local fallback
+- **GeminiService**: AI reasoning, embeddings, test generation, code fixes
+- **GitService**: Git operations via simple-git
 
 ---
 
-## 4. Technical Debt & Known Constraints
+## 4. Implementation Status
 
-### 4.1. Context Window Management
-*   **Current State**: We rely on heuristic selection (Active File + Open Tabs + Recent Git Diff).
-*   **Limitation**: This may miss relevant context in "spooky action at a distance" scenarios (e.g., changing an interface affecting a distant consumer).
-*   **Future Mitigation**: Implement RAG (Retrieval-Augmented Generation) using the LanceDB vector store to pull semantically relevant files.
+### ✅ Completed
+- [x] Async extension activation
+- [x] Storage initialization with embedding service
+- [x] Event ingestion with embeddings
+- [x] RAG-based context retrieval via ContextBuilder
+- [x] Idle detection service
+- [x] Autonomous agent with branch isolation
+- [x] Cloudflare linting integration with fallback
+- [x] Session management
 
-### 4.2. Extension Host Performance
-*   **Current State**: Heavy reliance on `setInterval` for the autonomous heartbeat.
-*   **Limitation**: Can potentially impact battery life or performance if the interval is too aggressive.
-*   **Future Mitigation**: Move the heartbeat to a dedicated worker thread or rely strictly on event-driven triggers.
+### 🚧 In Progress
+- [ ] End-to-end testing of ingestion pipeline
+- [ ] Autonomous agent flow testing (idle -> lint -> test)
+- [ ] UI integration (sidebar showing work done)
+- [ ] ElevenLabs TTS integration
 
-### 4.3. Error Handling Strategy
-*   **Current State**: "Fail Open". If the AI fails, we fall back to standard linting.
-*   **Requirement**: Ensure UI feedback clearly distinguishes between "AI is thinking", "AI failed", and "No issues found".
+### 📋 TODO
+- [ ] Optimize context window management
+- [ ] Add more autonomous tasks (refactoring, documentation)
+- [ ] Performance monitoring and optimization
+- [ ] Error recovery UI improvements
 
 ---
 
 ## 5. Developer Guidelines
-*   **Do not block the UI thread.** All I/O and heavy computation must be async or offloaded.
-*   **Prefer `WorkspaceEdit`.** Never use `fs` module for code modification. VS Code's edit API ensures atomicity and undo stack integration.
-*   **Keep `CONTEXT.md` updated.** This file is the source of truth for architectural intent. If you change the data flow, update the diagram.
+
+### DO
+- **Always use async/await**: Extension activation and all service initialization
+- **Initialize in sequence**: Services have dependencies; respect the order
+- **Use WorkspaceEdit API**: For all code modifications (ensures undo/redo works)
+- **Handle errors gracefully**: Provide fallbacks and user feedback
+- **Log extensively**: Use console.log for debugging; OutputChannel for user-visible logs
+
+### DON'T
+- **Block the UI thread**: All I/O and heavy computation must be async
+- **Use fs module directly**: Use VS Code's workspace.fs API instead
+- **Ignore error cases**: Always catch and handle exceptions
+- **Hardcode configuration**: Use VS Code settings API
+- **Skip initialization**: Services won't work without proper init
+
+### Configuration Keys
+```json
+{
+  "copilot.gemini.apiKey": "your-gemini-api-key",
+  "copilot.elevenlabs.apiKey": "your-elevenlabs-api-key",
+  "copilot.cloudflare.workerUrl": "https://your-worker.workers.dev",
+  "copilot.autonomous.enabled": false,
+  "copilot.autonomous.idleTimeout": 300
+}
+```
+
+---
+
+## 6. Known Limitations & Future Work
+
+### Current Limitations
+1. **Context Window**: Still relies on heuristics; RAG helps but could be smarter
+2. **Idle Threshold**: Fixed threshold; could adapt based on user patterns
+3. **Single-File Focus**: Autonomous agent focuses on active file; could be multi-file aware
+4. **Error Recovery**: Basic error messages; could provide more actionable guidance
+
+### Future Enhancements
+1. **Adaptive Idle Detection**: Learn user patterns over time
+2. **Multi-File Autonomous Tasks**: Refactoring across multiple files
+3. **User Preference Learning**: Adapt behavior based on accepted/rejected suggestions
+4. **Performance Metrics**: Track and display time saved by autonomous work
+5. **Team Collaboration**: Share sessions and context across team members
+
+---
+
+## 7. Testing Strategy
+
+### Manual Testing Checklist
+1. Edit a file -> Check LanceDB for events with embeddings
+2. Go idle for 15s -> Verify autonomous agent triggers
+3. Check git branches -> Verify copilot/* branch created
+4. Review commits -> Verify linting and test generation commits
+5. Query context -> Verify RAG returns relevant past work
+
+### Automated Testing
+- Unit tests for services (mocked dependencies)
+- Integration tests for ingestion pipeline
+- E2E tests for autonomous agent flow
+
+---
+
+*Last Updated: Current Implementation*
+*Status: Core infrastructure complete, testing phase*
