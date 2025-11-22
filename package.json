@@ -143,6 +143,7 @@
   },
   "devDependencies": {
     "@types/node": "22.x",
+    "@types/uuid": "^9.0.8",
     "@types/vscode": "^1.106.1",
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
@@ -159,7 +160,10 @@
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.25.0",
+    "@google/generative-ai": "^0.24.1",
+    "@lancedb/lancedb": "^0.22.3",
     "@solana/web3.js": "^1.98.4",
-    "gitlog": "^5.1.0"
+    "gitlog": "^5.1.0",
+    "uuid": "^9.0.1"
   }
 }

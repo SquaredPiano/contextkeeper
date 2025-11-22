@@ -10,14 +10,10 @@ vsc-extension-quickstart.md
 **/eslint.config.mjs
 **/*.map
 **/.vscode-test.*
-<<<<<<< HEAD
 
 .env
 .env.local
 .env*
-=======
 .DS_Store
 dist/
 *.env
-
->>>>>>> 15b34e4 (Add Cloudflare worker + update ignores + tsconfig)
