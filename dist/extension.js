@@ -135,14 +135,20 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.getLogsWithGitlog = getLogsWithGitlog;
-const gitlog_1 = __webpack_require__(3);
+// @ts-ignore
+const gitlog = __importStar(__webpack_require__(3));
 const vscode = __importStar(__webpack_require__(1));
-async function getLogsWithGitlog() {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+async function getLogsWithGitlog(repoPath) {
+    const workspaceFolder = repoPath || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!workspaceFolder) {
         throw new Error("No workspace folder found");
     }
-    const commits = await (0, gitlog_1.gitlogPromise)({
+    // Dynamic import to handle ESM/CJS interop issues in different environments
+    // @ts-ignore
+    const gl = gitlog.default || gitlog;
+    // @ts-ignore
+    const promiseFunc = gl.gitlogPromise || gl;
+    const commits = await promiseFunc({
         repo: workspaceFolder,
         number: 10,
         fields: ["hash", "authorName", "authorDate", "subject"],
