@@ -12,7 +12,14 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+<<<<<<< HEAD
 
 .env
 .env.local
 .env*
+=======
+.DS_Store
+dist/
+*.env
+
+>>>>>>> 15b34e4 (Add Cloudflare worker + update ignores + tsconfig)
