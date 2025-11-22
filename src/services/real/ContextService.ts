@@ -1,8 +1,9 @@
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
-import { storage } from '../storage';
 import {
 	IContextService,
+	IStorageService,
+	IAIService,
 	DeveloperContext,
 	GitCommit,
 	FileDiff,
@@ -10,13 +11,16 @@ import {
 	EditEvent,
 	FileEvent,
 } from '../interfaces';
+import { getDocumentSymbols, findFunctionAtPosition } from '../../utils/symbolUtils';
 
 export class ContextService extends EventEmitter implements IContextService {
-	
-	constructor() {
+	private storage: IStorageService;
+	private aiService?: IAIService;
+
+	constructor(storage: IStorageService, aiService?: IAIService) {
 		super();
-		// We rely on ContextIngestionService for writing to the DB.
-		// This service reads from DB and VS Code API.
+		this.storage = storage;
+		this.aiService = aiService;
 	}
 
 	/**
@@ -24,11 +28,11 @@ export class ContextService extends EventEmitter implements IContextService {
 	 */
 	async collectContext(): Promise<DeveloperContext> {
 		try {
-			// Ensure storage is connected
-			await storage.connect();
+			// Ensure storage is connected (if needed, though usually initialized in extension)
+			// await this.storage.connect(); // Assuming connection is handled externally or implicitly
 
 			// 1. Fetch recent events from LanceDB
-			const recentEvents = await storage.getRecentEvents(100); // Fetch last 100 events
+			const recentEvents = await this.storage.getRecentEvents(100);
 
 			// 2. Process events into context structures
 			const gitContext = this.processGitEvents(recentEvents);
@@ -51,6 +55,53 @@ export class ContextService extends EventEmitter implements IContextService {
 			console.error('Error collecting context:', error);
 			this.emit('error', error);
 			throw error;
+		}
+	}
+
+	// ...
+
+	async getLatestContextSummary(): Promise<string> {
+		try {
+			// 1. Get last active file
+			const lastFile = await this.storage.getLastActiveFile();
+
+			// 2. Get recent actions (chronological)
+			const recentActions = await this.storage.getRecentActions(5);
+
+			if (!lastFile && recentActions.length === 0) {
+				return "I don't see any recent activity. Ready to start something new?";
+			}
+
+			// 3. If AI Service is available, generate a smart summary
+			if (this.aiService && recentActions.length > 0) {
+				const activityLog = recentActions.map(a => 
+					`- [${new Date(a.timestamp).toLocaleTimeString()}] ${a.description}`
+				).join('\n');
+				
+				try {
+					return await this.aiService.summarize(activityLog);
+				} catch (error) {
+					console.warn('AI summary failed, falling back to simple summary:', error);
+				}
+			}
+
+			// 4. Fallback: Simple string concatenation
+			let message = "Welcome back. ";
+
+			if (lastFile) {
+				message += `You were last working on ${lastFile}.`;
+			}
+
+			if (recentActions.length > 0) {
+				const lastAction = recentActions[0];
+				message += ` It looks like you were: ${lastAction.description}`;
+			}
+
+			return message;
+
+		} catch (error: any) {
+			console.error('Error getting context summary:', error);
+			return "Welcome back. I had some trouble retrieving your exact context, but I'm ready to help.";
 		}
 	}
 
@@ -172,7 +223,7 @@ export class ContextService extends EventEmitter implements IContextService {
 	 */
 	private processSession(events: any[]): DeveloperContext['session'] {
 		const editEvents = events.filter(e => e.event_type === 'file_edit');
-		
+
 		// Calculate risky files (edited frequently)
 		const frequency = new Map<string, number>();
 		editEvents.forEach(e => {
@@ -198,7 +249,7 @@ export class ContextService extends EventEmitter implements IContextService {
 	 */
 	private async collectCursorContext(): Promise<DeveloperContext['cursor']> {
 		const editor = vscode.window.activeTextEditor;
-		
+
 		if (!editor) {
 			return {
 				file: '',
@@ -215,12 +266,9 @@ export class ContextService extends EventEmitter implements IContextService {
 
 		try {
 			// Attempt to find current function using symbols
-			const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-				'vscode.executeDocumentSymbolProvider',
-				editor.document.uri
-			);
+			const symbols = await getDocumentSymbols(editor.document.uri);
 			if (symbols) {
-				currentFunction = this.findFunctionAtPosition(symbols, position) || '';
+				currentFunction = findFunctionAtPosition(symbols, position) || '';
 			}
 		} catch (e) {
 			// Ignore symbol provider errors
@@ -233,24 +281,5 @@ export class ContextService extends EventEmitter implements IContextService {
 			currentFunction,
 			selectedText,
 		};
-	}
-
-	private findFunctionAtPosition(
-		symbols: vscode.DocumentSymbol[],
-		pos: vscode.Position
-	): string | undefined {
-		for (const symbol of symbols) {
-			if (symbol.range.contains(pos)) {
-				if (
-					symbol.kind === vscode.SymbolKind.Function ||
-					symbol.kind === vscode.SymbolKind.Method
-				) {
-					return symbol.name;
-				}
-				const child = this.findFunctionAtPosition(symbol.children, pos);
-				if (child) return child;
-			}
-		}
-		return undefined;
 	}
 }

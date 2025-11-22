@@ -3,7 +3,7 @@ import * as vscode from "vscode";
 import { Orchestrator, OrchestratorConfig, PipelineResult, FileAnalysisResult } from "./orchestrator";
 
 export async function demoOrchestrator() {
-  console.log("🚀 Orchestrator Demo\n");
+  console.log("[INFO] Orchestrator Demo\n");
 
   const config: OrchestratorConfig = {
     cloudflareWorkerUrl:
@@ -16,18 +16,18 @@ export async function demoOrchestrator() {
 
   const orchestrator = new Orchestrator(config);
 
-  orchestrator.on("initialized", () => console.log("✅ Orchestrator initialized"));
-  orchestrator.on("contextCollectionStarted", () => console.log("📊 Collecting context..."));
-  orchestrator.on("pipelineStarted", () => console.log("\n🔍 Running Analysis Pipeline..."));
+  orchestrator.on("initialized", () => console.log("[OK] Orchestrator initialized"));
+  orchestrator.on("contextCollectionStarted", () => console.log("[INFO] Collecting context..."));
+  orchestrator.on("pipelineStarted", () => console.log("\n[INFO] Running Analysis Pipeline..."));
 
   orchestrator.on("pipelineComplete", (result: PipelineResult) => {
-    console.log("\n🎉 Pipeline Complete!");
+    console.log("\n[SUCCESS] Pipeline Complete!");
     console.log(`  Analyzed: ${result.summary.totalFiles} file(s)`);
     console.log(`  Issues Found: ${result.summary.totalIssues}`);
     console.log(`  Overall Risk: ${result.summary.overallRiskLevel}`);
 
     result.fileAnalyses.forEach((analysis: FileAnalysisResult) => {
-      console.log(`\n📄 ${analysis.filePath}`);
+      console.log(`\n[FILE] ${analysis.filePath}`);
 
       if (analysis.lintResult) {
         console.log(`  Cloudflare warnings: ${analysis.lintResult.warnings.length}`);

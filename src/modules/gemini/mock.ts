@@ -2,7 +2,7 @@ import { GeminiModule } from './index';
 import { Analysis, CodeFix } from './types';
 
 export class MockGemini implements GeminiModule {
-  async initialize(apiKey: string): Promise<void> {
+  async initialize(apiKey: string, modelName?: string): Promise<void> {
     // Mock initialization
   }
 
@@ -12,6 +12,11 @@ export class MockGemini implements GeminiModule {
 
   enableMockMode(): void {
     // Already in mock mode
+  }
+
+  async getEmbedding(text: string): Promise<number[]> {
+    // Return a mock embedding (vector of 768 zeros)
+    return new Array(768).fill(0);
   }
 
   async analyzeCode(code: string, context?: any): Promise<Analysis> {

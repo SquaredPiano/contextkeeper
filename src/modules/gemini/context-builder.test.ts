@@ -4,11 +4,11 @@ import { RawLogInput } from './types';
 import { IStorageService } from '../../services/interfaces';
 
 describe('ContextBuilder', () => {
-  const mockStorage: IStorageService = {
+  const mockStorage = {
     getSimilarSessions: vi.fn().mockResolvedValue([
       { summary: 'Previous session', timestamp: 1234567890 }
     ])
-  };
+  } as unknown as IStorageService;
 
   const rawInput: RawLogInput = {
     gitLogs: ['commit 1', 'commit 2'],

@@ -28,11 +28,13 @@
         {
           "type": "webview",
           "id": "copilot.mainView",
-          "name": "Dashboard"
+          "name": "Dashboard",
+          "icon": "$(dashboard)"
         },
         {
           "id": "copilot.issuesTree",
-          "name": "Issues Found"
+          "name": "Issues Found",
+          "icon": "$(bug)"
         }
       ]
     },
@@ -148,6 +150,7 @@
   },
   "devDependencies": {
     "@types/node": "22.x",
+    "@types/node-fetch": "^2.6.13",
     "@types/uuid": "^9.0.8",
     "@types/vscode": "^1.106.1",
     "@vscode/test-cli": "^0.0.12",
@@ -169,6 +172,7 @@
     "@solana/web3.js": "^1.98.4",
     "dotenv": "^17.2.3",
     "gitlog": "^5.1.0",
+    "simple-git": "^3.30.0",
     "uuid": "^9.0.1"
   }
 }

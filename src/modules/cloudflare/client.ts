@@ -2,6 +2,7 @@
 // VSCode-side API wrapper to call the Cloudflare worker
 
 import { CloudflareLintResult } from "./types";
+export { CloudflareLintResult };
 
 export class CloudflareClient {
   private url: string;

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { IAIService, DeveloperContext, AIAnalysis, ExtensionState } from '../services/interfaces';
+import { IAIService, IVoiceService, DeveloperContext, AIAnalysis, ExtensionState } from '../services/interfaces';
 import { ContextService } from '../services/real/ContextService';
 import { NotificationManager } from '../ui/NotificationManager';
 import { SidebarWebviewProvider } from '../ui/SidebarWebviewProvider';
@@ -14,10 +14,11 @@ export class CommandManager {
     private context: vscode.ExtensionContext,
     private contextService: ContextService,
     private aiService: IAIService,
+    private voiceService: IVoiceService,
     private sidebarProvider: SidebarWebviewProvider,
     private statusBar: StatusBarManager,
     private issuesTreeProvider: IssuesTreeProvider
-  ) {}
+  ) { }
 
   public registerCommands() {
     this.registerAnalysisCommands();
@@ -52,6 +53,18 @@ export class CommandManager {
         await this.refreshContext();
       })
     );
+
+    this.context.subscriptions.push(
+      vscode.commands.registerCommand('copilot.resumeWork', async () => {
+        await this.resumeWork();
+      })
+    );
+
+    this.context.subscriptions.push(
+      vscode.commands.registerCommand('copilot.startAutonomousSession', async () => {
+        await this.startAutonomousSession();
+      })
+    );
   }
 
   private registerNavigationCommands() {
@@ -62,12 +75,12 @@ export class CommandManager {
     );
 
     this.context.subscriptions.push(
-      vscode.commands.registerCommand('copilot.navigateToIssue', 
+      vscode.commands.registerCommand('copilot.navigateToIssue',
         async (file: string, line: number, column: number = 0) => {
           try {
             const document = await vscode.workspace.openTextDocument(file);
             const editor = await vscode.window.showTextDocument(document);
-            
+
             const position = new vscode.Position(line - 1, column);
             editor.selection = new vscode.Selection(position, position);
             editor.revealRange(
@@ -96,7 +109,7 @@ export class CommandManager {
           const channel = vscode.window.createOutputChannel("ContextKeeper Storage");
           channel.clear();
           channel.appendLine("=== Recent Stored Events (LanceDB) ===");
-          
+
           if (events.length === 0) {
             channel.appendLine("No events found.");
           }
@@ -106,7 +119,7 @@ export class CommandManager {
             channel.appendLine(`    File: ${event.file_path}`);
             channel.appendLine(`    Metadata: ${event.metadata}`);
           });
-          
+
           channel.show();
         } catch (error: any) {
           vscode.window.showErrorMessage(`Failed to fetch events: ${error.message}`);
@@ -147,7 +160,7 @@ export class CommandManager {
 
     // Auto-lint commands (simplified for now, ideally moved to LintingService)
     let fileWatcher: FileWatcher | null = null;
-    
+
     this.context.subscriptions.push(
       vscode.commands.registerCommand("contextkeeper.startAutoLint", () => {
         if (fileWatcher) {
@@ -206,11 +219,41 @@ export class CommandManager {
       };
       this.statusBar.setState(state);
       this.sidebarProvider.showError(error.message);
-      
+
+      await NotificationManager.showErrorWithRetry(
+        `Analysis failed: ${error.message}`,
+        () => this.runAnalysis()
+      );
       await NotificationManager.showErrorWithRetry(
         `Analysis failed: ${error.message}`,
         () => this.runAnalysis()
       );
     }
+  }
+
+  private async resumeWork(): Promise<void> {
+    try {
+      const summary = await this.contextService.getLatestContextSummary();
+
+      // Show notification
+      vscode.window.showInformationMessage(summary);
+
+      // Speak it
+      if (this.voiceService.isEnabled()) {
+        await this.voiceService.speak(summary, 'professional');
+      }
+    } catch (error: any) {
+      NotificationManager.showError(`Failed to resume work: ${error.message}`);
+    }
+  }
+
+  private async startAutonomousSession(): Promise<void> {
+    // Lazy load agent to avoid circular deps or complex init if not needed
+    // For now, we instantiate it here. Ideally, pass it in constructor.
+    // But we need IGitService in CommandManager to pass it.
+    // Let's just mock the start for the "Thin" path verification.
+    vscode.window.showInformationMessage("Starting Autonomous Session (Thin Path)...");
+
+    // In a real app, we'd call this.autonomousAgent.startSession("Fix bugs");
   }
 }

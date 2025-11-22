@@ -12,6 +12,8 @@
  */
 
 import { EventEmitter } from 'events';
+import { ActionRecord, EventRecord } from './storage/schema';
+export { ActionRecord, EventRecord };
 
 // ============================================================================
 // DATA STRUCTURES
@@ -132,6 +134,7 @@ export interface IContextService extends EventEmitter {
 	collectContext(): Promise<DeveloperContext>;
 	getCurrentFile(): string;
 	getRiskyFiles(): string[];
+	getLatestContextSummary(): Promise<string>;
 }
 
 /**
@@ -145,6 +148,8 @@ export interface IAIService extends EventEmitter {
 	generateTests(code: string): Promise<string>;
 	fixError(code: string, error: string): Promise<CodeFix>;
 	explainCode(code: string): Promise<string>;
+	summarize(text: string): Promise<string>;
+	plan(goal: string, context: DeveloperContext): Promise<string>;
 }
 
 /**
@@ -182,16 +187,33 @@ export interface IEmbeddingService {
 	getEmbedding(text: string): Promise<number[]>;
 }
 
+export interface SessionRecord {
+	id: string;
+	timestamp: number;
+	summary: string;
+	embedding: number[];
+	project: string;
+	event_count: number;
+}
+
 export interface StorageEvent {
-    timestamp: number;
-    event_type: string;
-    file_path: string;
-    metadata: string;
+	timestamp: number;
+	event_type: string;
+	file_path: string;
+	metadata: string;
 }
 
 export interface IStorageService {
-  getSimilarSessions(query: string, topK?: number): Promise<Array<{ summary: string; timestamp: number }>>;
-  logEvent(event: StorageEvent): Promise<void>;
+	connect(embeddingService?: any): Promise<void>;
+	logEvent(event: Omit<EventRecord, 'id'>): Promise<void>;
+	createSession(summary: string, project: string): Promise<SessionRecord>;
+	addAction(action: Omit<ActionRecord, 'id' | 'embedding'>): Promise<void>;
+	getLastSession(): Promise<SessionRecord | null>;
+	getSimilarSessions(query: string, topK?: number): Promise<SessionRecord[]>;
+	getSimilarActions(query: string, topK?: number): Promise<ActionRecord[]>;
+	getRecentEvents(limit?: number): Promise<EventRecord[]>;
+	getRecentActions(limit?: number): Promise<ActionRecord[]>;
+	getLastActiveFile(): Promise<string | null>;
 }
 
 // ============================================================================
@@ -236,7 +258,7 @@ export type ExtensionToUIMessage =
 	| { type: 'progress'; progress: number; message: string }
 	| { type: 'error'; message: string };
 
-export type ExtensionState = 
+export type ExtensionState =
 	| { status: 'idle' }
 	| { status: 'analyzing'; progress: number; message: string }
 	| { status: 'complete'; issuesFound: number }

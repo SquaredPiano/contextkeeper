@@ -25,7 +25,7 @@ export class MockVoiceService implements IVoiceService {
 			return;
 		}
 
-		console.log(`[Mock Voice] 🔊 Would speak: "${text}" (${voice} voice)`);
+		console.log(`[Mock Voice] Would speak: "${text}" (${voice} voice)`);
 		
 		// Show notification as visual feedback
 		const icon = this.getIconForVoice(voice);
@@ -47,12 +47,12 @@ export class MockVoiceService implements IVoiceService {
 	private getIconForVoice(voice: string): string {
 		switch (voice) {
 			case 'casual':
-				return '😎';
+				return '[Casual]';
 			case 'encouraging':
-				return '🎉';
+				return '[Encouraging]';
 			case 'professional':
 			default:
-				return '🤖';
+				return '[Bot]';
 		}
 	}
 

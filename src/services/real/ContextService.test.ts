@@ -43,10 +43,23 @@ vi.mock('../storage', () => ({
 }));
 
 describe('ContextService', () => {
-  let service: ContextService;
+  let contextService: ContextService;
 
   beforeEach(() => {
-    service = new ContextService();
+    // Mock storage
+    const mockStorage = {
+      connect: vi.fn(),
+      logEvent: vi.fn(),
+      createSession: vi.fn(),
+      addAction: vi.fn(),
+      getLastSession: vi.fn(),
+      getSimilarSessions: vi.fn(),
+      getSimilarActions: vi.fn(),
+      getRecentEvents: vi.fn(),
+      getLastActiveFile: vi.fn(),
+      clearAllTables: vi.fn()
+    };
+    contextService = new ContextService(mockStorage as any);
     vi.clearAllMocks();
   });
 
@@ -71,9 +84,20 @@ describe('ContextService', () => {
       },
     ];
 
-    (storage.getRecentEvents as any).mockResolvedValue(mockEvents);
+    // We need to mock the injected storage, not the global one, but for this test structure 
+    // we might need to adjust how we mock. 
+    // However, since we passed a mockStorage to the constructor, we should mock THAT instance.
+    // But here we are mocking the global storage import? 
+    // The previous code was mocking `storage.getRecentEvents`. 
+    // Since we injected a mock, we should use that mock.
+    // But `mockStorage` is local to beforeEach.
+    // Let's redefine mockStorage at describe level or use the one on the instance if public?
+    // Or just cast contextService['storage'] to any.
 
-    const context = await service.collectContext();
+    const mockStorage = (contextService as any).storage;
+    mockStorage.getRecentEvents.mockResolvedValue(mockEvents);
+
+    const context = await contextService.collectContext();
 
     // Verify Git Context
     expect(context.git.recentCommits).toHaveLength(1);
@@ -94,9 +118,10 @@ describe('ContextService', () => {
   });
 
   it('should handle empty storage gracefully', async () => {
-    (storage.getRecentEvents as any).mockResolvedValue([]);
+    const mockStorage = (contextService as any).storage;
+    mockStorage.getRecentEvents.mockResolvedValue([]);
 
-    const context = await service.collectContext();
+    const context = await contextService.collectContext();
 
     expect(context.git.recentCommits).toHaveLength(0);
     expect(context.files.recentlyEdited).toHaveLength(0);
@@ -112,9 +137,10 @@ describe('ContextService', () => {
       metadata: JSON.stringify({ changeCount: 1 }),
     }));
 
-    (storage.getRecentEvents as any).mockResolvedValue(mockEvents);
+    const mockStorage = (contextService as any).storage;
+    mockStorage.getRecentEvents.mockResolvedValue(mockEvents);
 
-    const context = await service.collectContext();
+    const context = await contextService.collectContext();
 
     expect(context.session.riskyFiles).toContain('risky.ts');
   });

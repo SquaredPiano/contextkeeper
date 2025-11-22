@@ -45,7 +45,7 @@ describe('ElevenLabsService', () => {
 
   it('should initialize with valid API key', async () => {
     await service.initialize('test-key');
-    expect(service.isReady()).toBe(true);
+    expect(service.isReady).toBe(true);
   });
 
   it('should fall back to console on API failure', async () => {

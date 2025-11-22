@@ -44,6 +44,10 @@ export class MockContextService extends EventEmitter implements IContextService 
 		return this.mockContext.session.riskyFiles;
 	}
 
+	async getLatestContextSummary(): Promise<string> {
+		return "Mock context summary: User was working on extension.ts, fixing bugs in the authentication flow.";
+	}
+
 	private generateMockContext(): DeveloperContext {
 		const now = new Date();
 		const oneHourAgo = new Date(now.getTime() - 3600000);
