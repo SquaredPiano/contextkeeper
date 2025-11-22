@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import { getLogsWithGitlog } from "./modules/gitlogs/gitlog";
 import { FileWatcher } from "./modules/gitlogs/fileWatcher";
 import { LintingService } from "./modules/gitlogs/LintingService";
+import { ContextIngestionService } from "./services/ingestion/ContextIngestionService";
 
 // Import mock services (INTEGRATION POINT: Replace with real services here)
 import { MockContextService } from "./services/mock/MockContextService";
@@ -37,6 +38,7 @@ let aiService: IAIService;
 let gitService: MockGitService;
 let voiceService: MockVoiceService;
 let lintingService: LintingService;
+let ingestionService: ContextIngestionService;
 
 // State
 let currentContext: DeveloperContext | null = null;
@@ -55,6 +57,10 @@ export function activate(context: vscode.ExtensionContext) {
   // Initialize Linting Service
   lintingService = new LintingService();
   lintingService.initialize(contextService);
+
+  // Initialize Context Ingestion Service (Real Persistence)
+  ingestionService = new ContextIngestionService();
+  ingestionService.initialize(context);
   
   // Initialize Gemini Service
   const geminiService = new GeminiService();
@@ -445,6 +451,10 @@ export function deactivate() {
   // Clean up linting service
   if (lintingService) {
     lintingService.dispose();
+  }
+  // Clean up ingestion service
+  if (ingestionService) {
+    ingestionService.dispose();
   }
 }
 
