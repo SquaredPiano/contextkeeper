@@ -45,12 +45,14 @@ exports.deactivate = deactivate;
 // Import the module and reference it with the alias vscode in your code below
 const vscode = __importStar(__webpack_require__(1));
 const gitlog_1 = __webpack_require__(2);
+const fileWatcher_1 = __webpack_require__(18);
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 function activate(context) {
     // Use the console to output diagnostic information (console.log) and errors (console.error)
     // This line of code will only be executed once when your extension is activated
     console.log('Congratulations, your extension "contextkeeper" is now active!');
+    let fileWatcher = null;
     // The command has been defined in the package.json file
     // Now provide the implementation of the command with registerCommand
     // The commandId parameter must match the command field in package.json
@@ -79,6 +81,29 @@ function activate(context) {
             vscode.window.showErrorMessage(`❌ Error: ${err.message}`);
             console.error("Gitlog error:", err);
         }
+    });
+    const startWatcher = vscode.commands.registerCommand("contextkeeper.startAutoLint", () => {
+        if (fileWatcher) {
+            vscode.window.showWarningMessage("Auto-lint is already running!");
+            return;
+        }
+        // Get the linting endpoint from settings (or use default)
+        const config = vscode.workspace.getConfiguration("contextkeeper");
+        const endpoint = config.get("lintingEndpoint") ||
+            "https://contextkeeper-worker.workers.dev/lint";
+        fileWatcher = new fileWatcher_1.FileWatcher(endpoint);
+        fileWatcher.start();
+        vscode.window.showInformationMessage("🔍 Auto-lint enabled! Files will be checked on save.");
+    });
+    // Command to stop auto-linting
+    const stopWatcher = vscode.commands.registerCommand("contextkeeper.stopAutoLint", () => {
+        if (!fileWatcher) {
+            vscode.window.showWarningMessage("Auto-lint is not running!");
+            return;
+        }
+        fileWatcher.stop();
+        fileWatcher = null;
+        vscode.window.showInformationMessage("⏸️ Auto-lint disabled.");
     });
     context.subscriptions.push(testGitlog);
     context.subscriptions.push(disposable);
@@ -1717,6 +1742,172 @@ module.exports = require("node:os");
 
 "use strict";
 module.exports = require("node:tty");
+
+/***/ }),
+/* 18 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FileWatcher = void 0;
+const vscode = __importStar(__webpack_require__(1));
+class FileWatcher {
+    watcher = null;
+    disposables = [];
+    lintingEndpoint;
+    constructor(lintingEndpoint = "https://your-worker.workers.dev/lint") {
+        this.lintingEndpoint = lintingEndpoint;
+    }
+    /**
+     * Start watching files in the workspace
+     */
+    start() {
+        console.log("[FileWatcher] Starting file monitoring...");
+        // Method 1: Watch specific file patterns (glob patterns)
+        // This creates a watcher for TypeScript and JavaScript files
+        this.watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,js,tsx,jsx}", // Watch these file types
+        false, // Don't ignore creates
+        false, // Don't ignore changes
+        false // Don't ignore deletes
+        );
+        // React to file creation
+        this.watcher.onDidCreate((uri) => {
+            console.log(`[FileWatcher] File created: ${uri.fsPath}`);
+            vscode.window.showInformationMessage(`📄 New file: ${uri.fsPath}`);
+        });
+        // React to file changes
+        this.watcher.onDidChange((uri) => {
+            console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
+        });
+        // React to file deletion
+        this.watcher.onDidDelete((uri) => {
+            console.log(`[FileWatcher] File deleted: ${uri.fsPath}`);
+        });
+        // Method 2: Watch for document saves (best for auto-linting)
+        const saveWatcher = vscode.workspace.onDidSaveTextDocument(async (document) => {
+            await this.onFileSaved(document);
+        });
+        // Method 3: Watch for any text document changes (real-time)
+        const changeWatcher = vscode.workspace.onDidChangeTextDocument((event) => {
+            // Only process if there are actual content changes
+            if (event.contentChanges.length > 0) {
+                console.log(`[FileWatcher] Document modified: ${event.document.fileName}`);
+            }
+        });
+        this.disposables.push(saveWatcher, changeWatcher);
+    }
+    /**
+     * Handle file save event - auto-lint the file
+     */
+    async onFileSaved(document) {
+        // Only process certain file types
+        const validExtensions = [".ts", ".js", ".tsx", ".jsx"];
+        const fileExt = document.fileName.substring(document.fileName.lastIndexOf("."));
+        if (!validExtensions.includes(fileExt)) {
+            return; // Skip non-code files
+        }
+        console.log(`[FileWatcher] Auto-linting: ${document.fileName}`);
+        try {
+            const code = document.getText();
+            // Call your Cloudflare worker to lint the code
+            const response = await fetch(this.lintingEndpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code }),
+            });
+            if (!response.ok) {
+                throw new Error(`Linting failed: ${response.statusText}`);
+            }
+            const result = await response.json();
+            // Show results to user
+            if (result.warnings && result.warnings.length > 0) {
+                const message = `⚠️ ${result.warnings.length} issue(s) found in ${document.fileName}`;
+                vscode.window.showWarningMessage(message);
+                // Optionally show detailed warnings in output channel
+                const outputChannel = vscode.window.createOutputChannel("Auto-Linter");
+                outputChannel.clear();
+                outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===\n`);
+                result.warnings.forEach((warning) => {
+                    outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
+                });
+                outputChannel.show();
+            }
+            else {
+                vscode.window.showInformationMessage(`✅ No issues found in ${document.fileName}`);
+            }
+            // If linting produced a fixed version, optionally apply it
+            if (result.linted && result.fixed !== code) {
+                const applyFix = await vscode.window.showInformationMessage("Apply auto-fix?", "Yes", "No");
+                if (applyFix === "Yes") {
+                    await this.applyFix(document, result.fixed);
+                }
+            }
+        }
+        catch (error) {
+            console.error("[FileWatcher] Linting error:", error);
+            vscode.window.showErrorMessage(`Linting failed: ${error}`);
+        }
+    }
+    /**
+     * Apply the fixed code to the document
+     */
+    async applyFix(document, fixedCode) {
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+        edit.replace(document.uri, fullRange, fixedCode);
+        await vscode.workspace.applyEdit(edit);
+        await document.save();
+        vscode.window.showInformationMessage("✅ Auto-fix applied!");
+    }
+    /**
+     * Stop watching files and clean up
+     */
+    stop() {
+        if (this.watcher) {
+            this.watcher.dispose();
+            this.watcher = null;
+        }
+        this.disposables.forEach((d) => d.dispose());
+        this.disposables = [];
+        console.log("[FileWatcher] Stopped file monitoring");
+    }
+}
+exports.FileWatcher = FileWatcher;
+
 
 /***/ })
 /******/ 	]);
