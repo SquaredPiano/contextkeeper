@@ -7,11 +7,16 @@ export class ContextIngestionService {
   private disposables: vscode.Disposable[] = [];
   private pendingEdits: Map<string, NodeJS.Timeout> = new Map();
   private readonly EDIT_DEBOUNCE_MS = 2000;
+  private outputChannel: vscode.OutputChannel | null = null;
 
   constructor() {}
 
-  public async initialize(context: vscode.ExtensionContext): Promise<void> {
+  public async initialize(context: vscode.ExtensionContext, outputChannel?: vscode.OutputChannel): Promise<void> {
     console.log('Initializing Context Ingestion Service...');
+    if (outputChannel) {
+      this.outputChannel = outputChannel;
+      this.outputChannel.appendLine('ContextIngestionService: Initializing...');
+    }
 
     // 1. Setup Git Watcher
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -71,6 +76,7 @@ export class ContextIngestionService {
           lineCount: document.lineCount
         })
       });
+      this.logToOutput(`[FILE_OPEN] ${vscode.workspace.asRelativePath(document.uri)}`);
     } catch (error) {
       console.error('Error logging file_open:', error);
     }
@@ -88,6 +94,7 @@ export class ContextIngestionService {
           languageId: document.languageId
         })
       });
+      this.logToOutput(`[FILE_CLOSE] ${vscode.workspace.asRelativePath(document.uri)}`);
     } catch (error) {
       console.error('Error logging file_close:', error);
     }
@@ -132,6 +139,7 @@ export class ContextIngestionService {
           changes: changeSummary
         })
       });
+      this.logToOutput(`[FILE_EDIT] ${vscode.workspace.asRelativePath(document.uri)} (${changes.length} changes)`);
     } catch (error) {
       console.error('Error logging file_edit:', error);
     }
@@ -150,6 +158,7 @@ export class ContextIngestionService {
           files: commit.files
         })
       });
+      this.logToOutput(`[GIT_COMMIT] ${commit.hash} - ${commit.message}`);
       console.log(`Logged git commit: ${commit.hash}`);
     } catch (error) {
       console.error('Error logging git_commit:', error);
@@ -158,5 +167,11 @@ export class ContextIngestionService {
 
   private shouldIgnoreFile(uri: vscode.Uri): boolean {
     return uri.scheme !== 'file' || uri.fsPath.includes('.git') || uri.fsPath.includes('node_modules');
+  }
+
+  private logToOutput(message: string): void {
+    if (this.outputChannel) {
+      this.outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
+    }
   }
 }

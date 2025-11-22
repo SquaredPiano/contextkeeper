@@ -8,7 +8,7 @@ import {
   FileEdit,
   EditEvent,
   FileEvent,
-} from "../interfaces";
+} from "../../services/interfaces";
 
 export class ContextService extends EventEmitter implements IContextService {
   // State tracking

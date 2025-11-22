@@ -1,10 +1,17 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
+import * as dotenv from "dotenv";
+import * as path from "path";
+
+// Load environment variables from .env.local
+dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
+
 import { getLogsWithGitlog } from "./modules/gitlogs/gitlog";
 import { FileWatcher } from "./modules/gitlogs/fileWatcher";
 import { LintingService } from "./modules/gitlogs/LintingService";
 import { ContextIngestionService } from "./services/ingestion/ContextIngestionService";
+import { storage } from "./services/storage";
 
 // Import mock services (INTEGRATION POINT: Replace with real services here)
 import { MockContextService } from "./services/mock/MockContextService";
@@ -49,169 +56,208 @@ let isAutonomousMode = false;
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
   console.log('Autonomous Copilot extension is now active!');
-  let fileWatcher: FileWatcher | null = null;
+  
+  try {
+    let fileWatcher: FileWatcher | null = null;
 
-  // Initialize services
-  contextService = new MockContextService();
-  
-  // Initialize Linting Service
-  lintingService = new LintingService();
-  lintingService.initialize(contextService);
+    // Initialize services
+    contextService = new MockContextService();
+    
+    // Initialize Linting Service
+    lintingService = new LintingService();
+    lintingService.initialize(contextService);
 
-  // Initialize Context Ingestion Service (Real Persistence)
-  ingestionService = new ContextIngestionService();
-  ingestionService.initialize(context);
-  
-  // Initialize Gemini Service
-  const geminiService = new GeminiService();
-  aiService = geminiService;
-  
-  // Try to get API key from settings
-  const ckConfig = vscode.workspace.getConfiguration('copilot');
-  const apiKey = ckConfig.get<string>('gemini.apiKey') || process.env.GEMINI_API_KEY || "";
-  
-  if (apiKey) {
-    geminiService.initialize(apiKey).then(() => {
-      console.log("Gemini Service initialized with API Key");
-    }).catch(err => {
-      console.error("Failed to initialize Gemini Service:", err);
-      NotificationManager.showError("Failed to connect to Gemini AI. Check your API Key.");
+    // Initialize Context Ingestion Service (Real Persistence)
+    const outputChannel = vscode.window.createOutputChannel("ContextKeeper Ingestion");
+    ingestionService = new ContextIngestionService();
+    // Don't await here to avoid blocking activation
+    ingestionService.initialize(context, outputChannel).catch(err => {
+      console.error("Failed to initialize ingestion service:", err);
+      outputChannel.appendLine(`Error initializing ingestion: ${err.message}`);
     });
-  } else {
-    console.warn("No Gemini API Key found. AI features will be disabled or mocked.");
-    NotificationManager.showError("Gemini API Key missing. Please set 'contextkeeper.gemini.apiKey' in settings.");
-  }
-
-  gitService = new MockGitService();
-  voiceService = new MockVoiceService();
-
-  // Initialize UI components
-  statusBar = new StatusBarManager();
-  
-  issuesTreeProvider = new IssuesTreeProvider();
-  const treeView = vscode.window.registerTreeDataProvider(
-    'copilot.issuesTree',
-    issuesTreeProvider
-  );
-
-  sidebarProvider = new SidebarWebviewProvider(
-    context.extensionUri,
-    handleWebviewMessage
-  );
-  const webviewProvider = vscode.window.registerWebviewViewProvider(
-    'copilot.mainView',
-    sidebarProvider
-  );
-
-  // Set up service event listeners
-  setupServiceListeners();
-
-  // Register commands
-  registerCommands(context);
-
-  // Add to subscriptions
-  context.subscriptions.push(
-    statusBar,
-    treeView,
-    webviewProvider,
-    lintingService,
-  );
-
-  // Load autonomous mode from settings
-  const config = vscode.workspace.getConfiguration('copilot');
-  isAutonomousMode = config.get('autonomous.enabled', false);
-
-  // Show welcome notification
-  NotificationManager.showSuccess(
-    '🤖 Autonomous Copilot is ready!',
-    'Open Dashboard'
-  ).then(action => {
-    if (action === 'Open Dashboard') {
-      vscode.commands.executeCommand('copilot.showPanel');
+    
+    // Initialize Gemini Service
+    const geminiService = new GeminiService();
+    aiService = geminiService;
+    
+    // Try to get API key from settings
+    const ckConfig = vscode.workspace.getConfiguration('copilot');
+    const apiKey = ckConfig.get<string>('gemini.apiKey') || process.env.GEMINI_API_KEY || "";
+    
+    if (apiKey) {
+      geminiService.initialize(apiKey).then(() => {
+        console.log("Gemini Service initialized with API Key");
+      }).catch(err => {
+        console.error("Failed to initialize Gemini Service:", err);
+        NotificationManager.showError("Failed to connect to Gemini AI. Check your API Key.");
+      });
+    } else {
+      console.warn("No Gemini API Key found. AI features will be disabled or mocked.");
+      NotificationManager.showError("Gemini API Key missing. Please set 'contextkeeper.gemini.apiKey' in settings.");
     }
-  });
 
-  // Legacy commands for backwards compatibility
-  const disposable = vscode.commands.registerCommand(
-    "contextkeeper.helloWorld",
-    () => {
-      vscode.window.showInformationMessage("Hello World from contextkeeper!");
-    }
-  );
+    gitService = new MockGitService();
+    voiceService = new MockVoiceService();
 
-  const testGitlog = vscode.commands.registerCommand(
-    "contextkeeper.testGitlog",
-    async () => {
-      try {
-        vscode.window.showInformationMessage("Fetching git logs...");
+    // Initialize UI components
+    statusBar = new StatusBarManager();
+    
+    issuesTreeProvider = new IssuesTreeProvider();
+    const treeView = vscode.window.registerTreeDataProvider(
+      'copilot.issuesTree',
+      issuesTreeProvider
+    );
 
-        const logs = await getLogsWithGitlog();
+    sidebarProvider = new SidebarWebviewProvider(
+      context.extensionUri,
+      handleWebviewMessage
+    );
+    const webviewProvider = vscode.window.registerWebviewViewProvider(
+      'copilot.mainView',
+      sidebarProvider
+    );
 
-        const outputChannel =
-          vscode.window.createOutputChannel("ContextKeeper");
-        outputChannel.clear();
-        outputChannel.appendLine("=== Recent Git Commits ===");
-        logs.forEach((commit: any, i: number) => {
-          outputChannel.appendLine(`\n${i + 1}. ${commit.subject}`);
-          outputChannel.appendLine(`   Author: ${commit.authorName}`);
-          outputChannel.appendLine(`   Hash: ${commit.hash}`);
-          outputChannel.appendLine(`   Date: ${commit.authorDate}`);
-        });
-        outputChannel.show();
+    // Set up service event listeners
+    setupServiceListeners();
+
+    // Register commands
+    registerCommands(context);
+
+    // Add to subscriptions
+    context.subscriptions.push(
+      statusBar,
+      treeView,
+      webviewProvider,
+      lintingService,
+    );
+
+    // Load autonomous mode from settings
+    const config = vscode.workspace.getConfiguration('copilot');
+    isAutonomousMode = config.get('autonomous.enabled', false);
+
+    // Show welcome notification
+    NotificationManager.showSuccess(
+      '🤖 Autonomous Copilot is ready!',
+      'Open Dashboard'
+    ).then(action => {
+      if (action === 'Open Dashboard') {
+        vscode.commands.executeCommand('copilot.showPanel');
+      }
+    });
+
+    // Legacy commands for backwards compatibility
+    const disposable = vscode.commands.registerCommand(
+      "contextkeeper.helloWorld",
+      () => {
+        vscode.window.showInformationMessage("Hello World from contextkeeper!");
+      }
+    );
+
+    const testGitlog = vscode.commands.registerCommand(
+      "contextkeeper.testGitlog",
+      async () => {
+        try {
+          vscode.window.showInformationMessage("Fetching git logs...");
+
+          const logs = await getLogsWithGitlog();
+
+          const outputChannel =
+            vscode.window.createOutputChannel("ContextKeeper");
+          outputChannel.clear();
+          outputChannel.appendLine("=== Recent Git Commits ===");
+          logs.forEach((commit: any, i: number) => {
+            outputChannel.appendLine(`\n${i + 1}. ${commit.subject}`);
+            outputChannel.appendLine(`   Author: ${commit.authorName}`);
+            outputChannel.appendLine(`   Hash: ${commit.hash}`);
+            outputChannel.appendLine(`   Date: ${commit.authorDate}`);
+          });
+          outputChannel.show();
+
+          vscode.window.showInformationMessage(
+            `✅ Found ${logs.length} commits!`
+          );
+        } catch (err: any) {
+          vscode.window.showErrorMessage(`❌ Error: ${err.message}`);
+          console.error("Gitlog error:", err);
+        }
+      }
+    );
+
+    const showStoredEvents = vscode.commands.registerCommand(
+      "contextkeeper.showStoredEvents",
+      async () => {
+        try {
+          const events = await storage.getRecentEvents(20);
+          const channel = vscode.window.createOutputChannel("ContextKeeper Storage");
+          channel.clear();
+          channel.appendLine("=== Recent Stored Events (LanceDB) ===");
+          
+          if (events.length === 0) {
+            channel.appendLine("No events found.");
+          }
+
+          events.forEach((event, i) => {
+            channel.appendLine(`\n[${i + 1}] ${new Date(event.timestamp).toLocaleString()} - ${event.event_type}`);
+            channel.appendLine(`    File: ${event.file_path}`);
+            channel.appendLine(`    Metadata: ${event.metadata}`);
+          });
+          
+          channel.show();
+        } catch (error: any) {
+          vscode.window.showErrorMessage(`Failed to fetch events: ${error.message}`);
+        }
+      }
+    );
+
+    const startWatcher = vscode.commands.registerCommand(
+      "contextkeeper.startAutoLint",
+      () => {
+        if (fileWatcher) {
+          vscode.window.showWarningMessage("Auto-lint is already running!");
+          return;
+        }
+
+        // Get the linting endpoint from settings (or use default)
+        const config = vscode.workspace.getConfiguration("contextkeeper");
+        const endpoint =
+          config.get<string>("lintingEndpoint") ||
+          "https://contextkeeper-worker.workers.dev/lint";
+
+        fileWatcher = new FileWatcher(endpoint);
+        fileWatcher.start();
 
         vscode.window.showInformationMessage(
-          `✅ Found ${logs.length} commits!`
+          "🔍 Auto-lint enabled! Files will be checked on save."
         );
-      } catch (err: any) {
-        vscode.window.showErrorMessage(`❌ Error: ${err.message}`);
-        console.error("Gitlog error:", err);
       }
-    }
-  );
+    );
 
-  const startWatcher = vscode.commands.registerCommand(
-    "contextkeeper.startAutoLint",
-    () => {
-      if (fileWatcher) {
-        vscode.window.showWarningMessage("Auto-lint is already running!");
-        return;
+    // Command to stop auto-linting
+    const stopWatcher = vscode.commands.registerCommand(
+      "contextkeeper.stopAutoLint",
+      () => {
+        if (!fileWatcher) {
+          vscode.window.showWarningMessage("Auto-lint is not running!");
+          return;
+        }
+
+        fileWatcher.stop();
+        fileWatcher = null;
+
+        vscode.window.showInformationMessage("⏸️ Auto-lint disabled.");
       }
+    );
 
-      // Get the linting endpoint from settings (or use default)
-      const config = vscode.workspace.getConfiguration("contextkeeper");
-      const endpoint =
-        config.get<string>("lintingEndpoint") ||
-        "https://contextkeeper-worker.workers.dev/lint";
+    context.subscriptions.push(startWatcher);
+    context.subscriptions.push(stopWatcher);
+    context.subscriptions.push(testGitlog);
+    context.subscriptions.push(showStoredEvents);
+    context.subscriptions.push(disposable);
 
-      fileWatcher = new FileWatcher(endpoint);
-      fileWatcher.start();
-
-      vscode.window.showInformationMessage(
-        "🔍 Auto-lint enabled! Files will be checked on save."
-      );
-    }
-  );
-
-  // Command to stop auto-linting
-  const stopWatcher = vscode.commands.registerCommand(
-    "contextkeeper.stopAutoLint",
-    () => {
-      if (!fileWatcher) {
-        vscode.window.showWarningMessage("Auto-lint is not running!");
-        return;
-      }
-
-      fileWatcher.stop();
-      fileWatcher = null;
-
-      vscode.window.showInformationMessage("⏸️ Auto-lint disabled.");
-    }
-  );
-
-  context.subscriptions.push(startWatcher);
-  context.subscriptions.push(stopWatcher);
-  context.subscriptions.push(testGitlog);
-  context.subscriptions.push(disposable);
+  } catch (error: any) {
+    console.error("Extension activation failed:", error);
+    vscode.window.showErrorMessage(`Autonomous Copilot failed to activate: ${error.message}`);
+  }
 }
 
 /**
