@@ -8,7 +8,9 @@ async function demo() {
   console.log('🎤 ElevenLabs Module Demo\n');
 
   const service = new ElevenLabsService();
-  await service.initialize(process.env.ELEVENLABS_API_KEY || '');
+  // Load API key from environment variable (supports ELEVEN_LABS_API_KEY from .env)
+  const apiKey = process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY || '';
+  await service.initialize(apiKey);
 
   console.log('Testing voices...\n');
 

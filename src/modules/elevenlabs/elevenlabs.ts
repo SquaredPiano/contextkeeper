@@ -46,6 +46,8 @@ export class ElevenLabsService {
     const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
     const body = JSON.stringify({ text });
 
+    console.log(`[ElevenLabs] Requesting TTS for: "${text}" (Voice: ${voiceId})`);
+
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -74,6 +76,8 @@ export class ElevenLabsService {
     const filePath = path.join(tmpDir, fileName);
 
     await fs.writeFile(filePath, buffer);
+
+    console.log(`[Audio] Playing ${fileName}...`);
 
     const platform = process.platform;
     let cmd: string;
