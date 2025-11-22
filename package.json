@@ -79,6 +79,14 @@
         "title": "Apply Suggested Fix",
         "category": "Copilot",
         "icon": "$(wrench)"
+      },
+      {
+        "command": "contextkeeper.startAutoLint",
+        "title": "ContextKeeper: Enable Auto-Lint on Save"
+      },
+      {
+        "command": "contextkeeper.stopAutoLint",
+        "title": "ContextKeeper: Disable Auto-Lint"
       }
     ],
     "configuration": {

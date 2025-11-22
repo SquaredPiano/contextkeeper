@@ -45,16 +45,17 @@ exports.deactivate = deactivate;
 // Import the module and reference it with the alias vscode in your code below
 const vscode = __importStar(__webpack_require__(1));
 const gitlog_1 = __webpack_require__(2);
+const fileWatcher_1 = __webpack_require__(18);
 // Import mock services (INTEGRATION POINT: Replace with real services here)
-const MockContextService_1 = __webpack_require__(18);
-const MockAIService_1 = __webpack_require__(20);
-const MockGitService_1 = __webpack_require__(21);
-const MockVoiceService_1 = __webpack_require__(22);
+const MockContextService_1 = __webpack_require__(19);
+const MockAIService_1 = __webpack_require__(21);
+const MockGitService_1 = __webpack_require__(22);
+const MockVoiceService_1 = __webpack_require__(23);
 // Import UI components
-const StatusBarManager_1 = __webpack_require__(23);
-const SidebarWebviewProvider_1 = __webpack_require__(24);
-const IssuesTreeProvider_1 = __webpack_require__(26);
-const NotificationManager_1 = __webpack_require__(27);
+const StatusBarManager_1 = __webpack_require__(24);
+const SidebarWebviewProvider_1 = __webpack_require__(25);
+const IssuesTreeProvider_1 = __webpack_require__(27);
+const NotificationManager_1 = __webpack_require__(28);
 // Global state
 let statusBar;
 let sidebarProvider;
@@ -72,6 +73,7 @@ let isAutonomousMode = false;
 // Your extension is activated the very first time the command is executed
 function activate(context) {
     console.log('Autonomous Copilot extension is now active!');
+    let fileWatcher = null;
     // Initialize services with MOCK implementations
     // INTEGRATION: Replace these with real service instances when backend is ready
     contextService = new MockContextService_1.MockContextService();
@@ -124,6 +126,31 @@ function activate(context) {
             console.error("Gitlog error:", err);
         }
     });
+    const startWatcher = vscode.commands.registerCommand("contextkeeper.startAutoLint", () => {
+        if (fileWatcher) {
+            vscode.window.showWarningMessage("Auto-lint is already running!");
+            return;
+        }
+        // Get the linting endpoint from settings (or use default)
+        const config = vscode.workspace.getConfiguration("contextkeeper");
+        const endpoint = config.get("lintingEndpoint") ||
+            "https://contextkeeper-worker.workers.dev/lint";
+        fileWatcher = new fileWatcher_1.FileWatcher(endpoint);
+        fileWatcher.start();
+        vscode.window.showInformationMessage("🔍 Auto-lint enabled! Files will be checked on save.");
+    });
+    // Command to stop auto-linting
+    const stopWatcher = vscode.commands.registerCommand("contextkeeper.stopAutoLint", () => {
+        if (!fileWatcher) {
+            vscode.window.showWarningMessage("Auto-lint is not running!");
+            return;
+        }
+        fileWatcher.stop();
+        fileWatcher = null;
+        vscode.window.showInformationMessage("⏸️ Auto-lint disabled.");
+    });
+    context.subscriptions.push(startWatcher);
+    context.subscriptions.push(stopWatcher);
     context.subscriptions.push(testGitlog);
     context.subscriptions.push(disposable);
 }
@@ -1943,6 +1970,172 @@ module.exports = require("node:tty");
 
 /***/ }),
 /* 18 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FileWatcher = void 0;
+const vscode = __importStar(__webpack_require__(1));
+class FileWatcher {
+    watcher = null;
+    disposables = [];
+    lintingEndpoint;
+    constructor(lintingEndpoint = "https://your-worker.workers.dev/lint") {
+        this.lintingEndpoint = lintingEndpoint;
+    }
+    /**
+     * Start watching files in the workspace
+     */
+    start() {
+        console.log("[FileWatcher] Starting file monitoring...");
+        // Method 1: Watch specific file patterns (glob patterns)
+        // This creates a watcher for TypeScript and JavaScript files
+        this.watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,js,tsx,jsx}", // Watch these file types
+        false, // Don't ignore creates
+        false, // Don't ignore changes
+        false // Don't ignore deletes
+        );
+        // React to file creation
+        this.watcher.onDidCreate((uri) => {
+            console.log(`[FileWatcher] File created: ${uri.fsPath}`);
+            vscode.window.showInformationMessage(`📄 New file: ${uri.fsPath}`);
+        });
+        // React to file changes
+        this.watcher.onDidChange((uri) => {
+            console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
+        });
+        // React to file deletion
+        this.watcher.onDidDelete((uri) => {
+            console.log(`[FileWatcher] File deleted: ${uri.fsPath}`);
+        });
+        // Method 2: Watch for document saves (best for auto-linting)
+        const saveWatcher = vscode.workspace.onDidSaveTextDocument(async (document) => {
+            await this.onFileSaved(document);
+        });
+        // Method 3: Watch for any text document changes (real-time)
+        const changeWatcher = vscode.workspace.onDidChangeTextDocument((event) => {
+            // Only process if there are actual content changes
+            if (event.contentChanges.length > 0) {
+                console.log(`[FileWatcher] Document modified: ${event.document.fileName}`);
+            }
+        });
+        this.disposables.push(saveWatcher, changeWatcher);
+    }
+    /**
+     * Handle file save event - auto-lint the file
+     */
+    async onFileSaved(document) {
+        // Only process certain file types
+        const validExtensions = [".ts", ".js", ".tsx", ".jsx"];
+        const fileExt = document.fileName.substring(document.fileName.lastIndexOf("."));
+        if (!validExtensions.includes(fileExt)) {
+            return; // Skip non-code files
+        }
+        console.log(`[FileWatcher] Auto-linting: ${document.fileName}`);
+        try {
+            const code = document.getText();
+            // Call your Cloudflare worker to lint the code
+            const response = await fetch(this.lintingEndpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code }),
+            });
+            if (!response.ok) {
+                throw new Error(`Linting failed: ${response.statusText}`);
+            }
+            const result = await response.json();
+            // Show results to user
+            if (result.warnings && result.warnings.length > 0) {
+                const message = `⚠️ ${result.warnings.length} issue(s) found in ${document.fileName}`;
+                vscode.window.showWarningMessage(message);
+                // Optionally show detailed warnings in output channel
+                const outputChannel = vscode.window.createOutputChannel("Auto-Linter");
+                outputChannel.clear();
+                outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===\n`);
+                result.warnings.forEach((warning) => {
+                    outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
+                });
+                outputChannel.show();
+            }
+            else {
+                vscode.window.showInformationMessage(`✅ No issues found in ${document.fileName}`);
+            }
+            // If linting produced a fixed version, optionally apply it
+            if (result.linted && result.fixed !== code) {
+                const applyFix = await vscode.window.showInformationMessage("Apply auto-fix?", "Yes", "No");
+                if (applyFix === "Yes") {
+                    await this.applyFix(document, result.fixed);
+                }
+            }
+        }
+        catch (error) {
+            console.error("[FileWatcher] Linting error:", error);
+            vscode.window.showErrorMessage(`Linting failed: ${error}`);
+        }
+    }
+    /**
+     * Apply the fixed code to the document
+     */
+    async applyFix(document, fixedCode) {
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+        edit.replace(document.uri, fullRange, fixedCode);
+        await vscode.workspace.applyEdit(edit);
+        await document.save();
+        vscode.window.showInformationMessage("✅ Auto-fix applied!");
+    }
+    /**
+     * Stop watching files and clean up
+     */
+    stop() {
+        if (this.watcher) {
+            this.watcher.dispose();
+            this.watcher = null;
+        }
+        this.disposables.forEach((d) => d.dispose());
+        this.disposables = [];
+        console.log("[FileWatcher] Stopped file monitoring");
+    }
+}
+exports.FileWatcher = FileWatcher;
+
+
+/***/ }),
+/* 19 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 "use strict";
@@ -1955,7 +2148,7 @@ module.exports = require("node:tty");
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.MockContextService = void 0;
-const events_1 = __webpack_require__(19);
+const events_1 = __webpack_require__(20);
 class MockContextService extends events_1.EventEmitter {
     mockContext;
     constructor() {
@@ -2067,14 +2260,14 @@ exports.MockContextService = MockContextService;
 
 
 /***/ }),
-/* 19 */
+/* 20 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("events");
 
 /***/ }),
-/* 20 */
+/* 21 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 "use strict";
@@ -2087,7 +2280,7 @@ module.exports = require("events");
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.MockAIService = void 0;
-const events_1 = __webpack_require__(19);
+const events_1 = __webpack_require__(20);
 class MockAIService extends events_1.EventEmitter {
     currentAnalysis = null;
     async analyze(code, context) {
@@ -2296,7 +2489,7 @@ exports.MockAIService = MockAIService;
 
 
 /***/ }),
-/* 21 */
+/* 22 */
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -2378,7 +2571,7 @@ exports.MockGitService = MockGitService;
 
 
 /***/ }),
-/* 22 */
+/* 23 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -2469,7 +2662,7 @@ exports.MockVoiceService = MockVoiceService;
 
 
 /***/ }),
-/* 23 */
+/* 24 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -2570,7 +2763,7 @@ exports.StatusBarManager = StatusBarManager;
 
 
 /***/ }),
-/* 24 */
+/* 25 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -2615,7 +2808,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SidebarWebviewProvider = void 0;
-const path = __importStar(__webpack_require__(25));
+const path = __importStar(__webpack_require__(26));
 const fs = __importStar(__webpack_require__(6));
 class SidebarWebviewProvider {
     extensionUri;
@@ -2702,14 +2895,14 @@ exports.SidebarWebviewProvider = SidebarWebviewProvider;
 
 
 /***/ }),
-/* 25 */
+/* 26 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("path");
 
 /***/ }),
-/* 26 */
+/* 27 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -2899,7 +3092,7 @@ class IssueTreeItem extends vscode.TreeItem {
 
 
 /***/ }),
-/* 27 */
+/* 28 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";

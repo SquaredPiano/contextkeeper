@@ -2,6 +2,7 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
 import { getLogsWithGitlog } from "./modules/gitlogs/gitlog";
+import { FileWatcher } from "./modules/gitlogs/fileWatcher";
 
 // Import mock services (INTEGRATION POINT: Replace with real services here)
 import { MockContextService } from "./services/mock/MockContextService";
@@ -43,6 +44,7 @@ let isAutonomousMode = false;
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
   console.log('Autonomous Copilot extension is now active!');
+  let fileWatcher: FileWatcher | null = null;
 
   // Initialize services with MOCK implementations
   // INTEGRATION: Replace these with real service instances when backend is ready
@@ -133,6 +135,48 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
   );
+
+  const startWatcher = vscode.commands.registerCommand(
+    "contextkeeper.startAutoLint",
+    () => {
+      if (fileWatcher) {
+        vscode.window.showWarningMessage("Auto-lint is already running!");
+        return;
+      }
+
+      // Get the linting endpoint from settings (or use default)
+      const config = vscode.workspace.getConfiguration("contextkeeper");
+      const endpoint =
+        config.get<string>("lintingEndpoint") ||
+        "https://contextkeeper-worker.workers.dev/lint";
+
+      fileWatcher = new FileWatcher(endpoint);
+      fileWatcher.start();
+
+      vscode.window.showInformationMessage(
+        "🔍 Auto-lint enabled! Files will be checked on save."
+      );
+    }
+  );
+
+  // Command to stop auto-linting
+  const stopWatcher = vscode.commands.registerCommand(
+    "contextkeeper.stopAutoLint",
+    () => {
+      if (!fileWatcher) {
+        vscode.window.showWarningMessage("Auto-lint is not running!");
+        return;
+      }
+
+      fileWatcher.stop();
+      fileWatcher = null;
+
+      vscode.window.showInformationMessage("⏸️ Auto-lint disabled.");
+    }
+  );
+
+  context.subscriptions.push(startWatcher);
+  context.subscriptions.push(stopWatcher);
   context.subscriptions.push(testGitlog);
   context.subscriptions.push(disposable);
 }
