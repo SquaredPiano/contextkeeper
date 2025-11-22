@@ -1333,25 +1333,54 @@ class ContextIngestionService {
         this.queue = new IngestionQueue_1.IngestionQueue(storage, sessionManager);
     }
     async initialize(context, outputChannel) {
-        console.log('Initializing Context Ingestion Service...');
+        console.log('[ContextIngestionService] Initializing Context Ingestion Service...');
         if (outputChannel) {
             this.outputChannel = outputChannel;
-            this.outputChannel.appendLine('ContextIngestionService: Initializing...');
+            this.outputChannel.appendLine('[ContextIngestionService] Initializing...');
         }
         // Start the ingestion queue
-        this.queue.start();
+        try {
+            this.queue.start();
+            this.logToOutput('Ingestion queue started');
+            console.log('[ContextIngestionService] Ingestion queue started');
+        }
+        catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[ContextIngestionService] Failed to start ingestion queue: ${errorMsg}`, error);
+            this.logToOutput(`❌ Failed to start ingestion queue: ${errorMsg}`);
+        }
         // 1. Setup Git Watcher
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (workspaceRoot) {
-            this.gitWatcher = new GitWatcher_1.GitWatcher(workspaceRoot);
-            this.gitWatcher.on('commit', (commit) => this.handleGitCommit(commit));
-            this.gitWatcher.start();
+            try {
+                this.gitWatcher = new GitWatcher_1.GitWatcher(workspaceRoot);
+                this.gitWatcher.on('commit', (commit) => this.handleGitCommit(commit));
+                await this.gitWatcher.start();
+                this.logToOutput(`Git watcher started for workspace: ${workspaceRoot}`);
+                console.log(`[ContextIngestionService] Git watcher started for workspace: ${workspaceRoot}`);
+            }
+            catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                console.error(`[ContextIngestionService] Failed to start git watcher: ${errorMsg}`, error);
+                this.logToOutput(`⚠️  Git watcher failed to start: ${errorMsg}`);
+            }
         }
         else {
-            console.warn('No workspace root found, Git ingestion disabled.');
+            const warningMsg = 'No workspace root found, Git ingestion disabled.';
+            console.warn(`[ContextIngestionService] ${warningMsg}`);
+            this.logToOutput(`⚠️  ${warningMsg}`);
         }
         // 2. Setup VS Code Listeners
-        this.setupListeners();
+        try {
+            this.setupListeners();
+            this.logToOutput('VS Code listeners setup complete');
+            console.log('[ContextIngestionService] VS Code listeners setup complete');
+        }
+        catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[ContextIngestionService] Failed to setup listeners: ${errorMsg}`, error);
+            this.logToOutput(`❌ Failed to setup listeners: ${errorMsg}`);
+        }
         // 3. Capture initial state
         if (vscode.window.activeTextEditor) {
             this.handleFileOpen(vscode.window.activeTextEditor.document);
@@ -1359,11 +1388,16 @@ class ContextIngestionService {
         // 4. Ensure Storage is Connected
         try {
             // await this.storage.connect(); // Assuming connection is handled externally
-            console.log('Storage connected for ingestion.');
+            console.log('[ContextIngestionService] Storage connected for ingestion.');
+            this.logToOutput('Storage connected for ingestion');
         }
         catch (error) {
-            console.error('Failed to connect storage for ingestion:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[ContextIngestionService] Failed to connect storage for ingestion: ${errorMsg}`, error);
+            this.logToOutput(`❌ Failed to connect storage: ${errorMsg}`);
         }
+        this.logToOutput('✅ Context Ingestion Service initialized');
+        console.log('[ContextIngestionService] ✅ Context Ingestion Service initialized');
     }
     dispose() {
         this.gitWatcher?.stop();
@@ -1413,22 +1447,26 @@ class ContextIngestionService {
             return;
         }
         try {
+            const relativePath = vscode.workspace.asRelativePath(document.uri);
             this.queue.enqueue({
                 type: 'event',
                 data: {
                     timestamp: Date.now(),
                     event_type: 'file_open',
-                    file_path: vscode.workspace.asRelativePath(document.uri),
+                    file_path: relativePath,
                     metadata: JSON.stringify({
                         languageId: document.languageId,
                         lineCount: document.lineCount
                     })
                 }
             });
-            this.logToOutput(`[FILE_OPEN] ${vscode.workspace.asRelativePath(document.uri)}`);
+            this.logToOutput(`[FILE_OPEN] ${relativePath}`);
+            console.log(`[ContextIngestionService] File opened: ${relativePath}`);
         }
         catch (error) {
-            console.error('Error logging file_open:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[ContextIngestionService] Error logging file_open: ${errorMsg}`, error);
+            this.logToOutput(`❌ Error logging file_open: ${errorMsg}`);
         }
     }
     async handleFileClose(document) {
@@ -1436,21 +1474,25 @@ class ContextIngestionService {
             return;
         }
         try {
+            const relativePath = vscode.workspace.asRelativePath(document.uri);
             this.queue.enqueue({
                 type: 'event',
                 data: {
                     timestamp: Date.now(),
                     event_type: 'file_close',
-                    file_path: vscode.workspace.asRelativePath(document.uri),
+                    file_path: relativePath,
                     metadata: JSON.stringify({
                         languageId: document.languageId
                     })
                 }
             });
-            this.logToOutput(`[FILE_CLOSE] ${vscode.workspace.asRelativePath(document.uri)}`);
+            this.logToOutput(`[FILE_CLOSE] ${relativePath}`);
+            console.log(`[ContextIngestionService] File closed: ${relativePath}`);
         }
         catch (error) {
-            console.error('Error logging file_close:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[ContextIngestionService] Error logging file_close: ${errorMsg}`, error);
+            this.logToOutput(`❌ Error logging file_close: ${errorMsg}`);
         }
     }
     handleFileEdit(event) {
@@ -1582,9 +1624,12 @@ class ContextIngestionService {
             });
             console.log(`[ContextIngestion] Queued action for embedding: "${description.substring(0, 100)}..."`);
             this.logToOutput(`[FILE_EDIT] ${relativePath} (${changes.length} changes)${affectedFunctionsList.length > 0 ? ` in ${affectedFunctionsList.join(', ')}` : ''}`);
+            console.log(`[ContextIngestionService] File edited: ${relativePath} (${changes.length} changes)${affectedFunctionsList.length > 0 ? ` in ${affectedFunctionsList.join(', ')}` : ''}`);
         }
         catch (error) {
-            console.error('Error logging file_edit:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[ContextIngestionService] Error logging file_edit: ${errorMsg}`, error);
+            this.logToOutput(`❌ Error logging file_edit: ${errorMsg}`);
         }
     }
     async handleGitCommit(commit) {
@@ -1614,11 +1659,13 @@ class ContextIngestionService {
                     files: JSON.stringify(commit.files)
                 }
             });
-            this.logToOutput(`[GIT_COMMIT] ${commit.hash} - ${commit.message}`);
-            console.log(`Logged git commit: ${commit.hash}`);
+            this.logToOutput(`[GIT_COMMIT] ${commit.hash} - ${commit.message} (${commit.files.length} files)`);
+            console.log(`[ContextIngestionService] Logged git commit: ${commit.hash} - ${commit.message} (${commit.files.length} files)`);
         }
         catch (error) {
-            console.error('Error logging git_commit:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[ContextIngestionService] Error logging git_commit: ${errorMsg}`, error);
+            this.logToOutput(`❌ Error logging git_commit: ${errorMsg}`);
         }
     }
     shouldIgnoreFile(uri) {
@@ -1688,14 +1735,17 @@ const events_1 = __webpack_require__(9);
 const cp = __importStar(__webpack_require__(13));
 const util = __importStar(__webpack_require__(14));
 const exec = util.promisify(cp.exec);
+const GitService_1 = __webpack_require__(87);
 class GitWatcher extends events_1.EventEmitter {
     workspaceRoot;
     disposables = [];
     lastCommitHash;
     repository;
+    gitService;
     constructor(workspaceRoot) {
         super();
         this.workspaceRoot = workspaceRoot;
+        this.gitService = new GitService_1.GitService(workspaceRoot);
     }
     async start() {
         try {
@@ -1755,14 +1805,31 @@ class GitWatcher extends events_1.EventEmitter {
                 const commits = await this.repository.log({ maxEntries: 1, ref: currentHash });
                 if (commits.length > 0) {
                     const commit = commits[0];
-                    // Fetch changed files using git CLI
+                    // Get file list from GitService
                     let files = [];
                     try {
-                        const { stdout } = await exec(`git show --name-only --pretty="" ${commit.hash}`, { cwd: this.workspaceRoot });
-                        files = stdout.split('\n').filter(line => line.trim() !== '');
+                        // Use git show to get files changed in this commit
+                        const { exec } = await Promise.resolve(/* import() */).then(__webpack_require__.t.bind(__webpack_require__, 13, 23));
+                        const { promisify } = await Promise.resolve(/* import() */).then(__webpack_require__.t.bind(__webpack_require__, 14, 23));
+                        const execAsync = promisify(exec);
+                        const { stdout } = await execAsync(`git show --name-only --pretty=format: ${commit.hash}`, { cwd: this.workspaceRoot, timeout: 2000 });
+                        files = stdout
+                            .trim()
+                            .split('\n')
+                            .filter(line => line.trim().length > 0 && !line.startsWith('commit'));
                     }
-                    catch (gitError) {
-                        console.error('Error fetching changed files via git CLI:', gitError);
+                    catch (fileError) {
+                        console.warn(`[GitWatcher] Failed to get files for commit ${commit.hash}:`, fileError);
+                        // Fallback: try to get files from recent commits using GitService
+                        try {
+                            const recentCommits = await this.gitService.getRecentCommits(1);
+                            if (recentCommits.length > 0 && recentCommits[0].hash === commit.hash) {
+                                files = recentCommits[0].files || [];
+                            }
+                        }
+                        catch (fallbackError) {
+                            console.warn(`[GitWatcher] Fallback file retrieval also failed:`, fallbackError);
+                        }
                     }
                     const event = {
                         hash: commit.hash,
@@ -1771,11 +1838,13 @@ class GitWatcher extends events_1.EventEmitter {
                         date: commit.authorDate?.toISOString() || new Date().toISOString(),
                         files: files
                     };
+                    console.log(`[GitWatcher] Emitting commit event: ${commit.hash} with ${files.length} files`);
                     this.emit('commit', event);
                 }
             }
             catch (e) {
-                console.error('Error fetching commit details:', e);
+                const errorMsg = e instanceof Error ? e.message : String(e);
+                console.error(`[GitWatcher] Error fetching commit details: ${errorMsg}`, e);
             }
         }
     }
@@ -1844,27 +1913,49 @@ class IngestionQueue {
         this.isProcessing = true;
         try {
             const batch = this.queue.splice(0, this.BATCH_SIZE);
+            const batchSize = batch.length;
+            console.log(`[IngestionQueue] Processing batch of ${batchSize} tasks (${this.queue.length} remaining in queue)`);
             // Process batch
             // Note: LanceDB might support batch inserts, but our interface might not.
             // For now, we'll process sequentially or in parallel promises.
+            let successCount = 0;
+            let errorCount = 0;
             const promises = batch.map(async (task) => {
                 try {
                     if (task.type === 'event') {
                         await this.storage.logEvent(task.data);
+                        successCount++;
                     }
                     else if (task.type === 'action') {
                         await this.storage.addAction(task.data);
+                        successCount++;
                     }
                 }
                 catch (error) {
-                    console.error(`Failed to process ingestion task (${task.type}):`, error);
+                    errorCount++;
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    console.error(`[IngestionQueue] Failed to process ingestion task (${task.type}): ${errorMsg}`, error);
+                    // Log task details for debugging
+                    if (task.type === 'event') {
+                        console.error(`[IngestionQueue] Failed event: ${task.data.event_type} - ${task.data.file_path}`);
+                    }
+                    else {
+                        console.error(`[IngestionQueue] Failed action: ${task.data.description}`);
+                    }
                     // Optionally re-queue if it's a transient error, but be careful of infinite loops
                 }
             });
             await Promise.all(promises);
+            if (successCount > 0) {
+                console.log(`[IngestionQueue] Successfully processed ${successCount}/${batchSize} tasks`);
+            }
+            if (errorCount > 0) {
+                console.warn(`[IngestionQueue] Failed to process ${errorCount}/${batchSize} tasks`);
+            }
         }
         catch (error) {
-            console.error('Error processing ingestion queue:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[IngestionQueue] Error processing ingestion queue: ${errorMsg}`, error);
         }
         finally {
             this.isProcessing = false;
@@ -6616,15 +6707,19 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.IdleService = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const idle_detector_1 = __webpack_require__(38);
+// Hardcoded idle threshold: 15 seconds exactly
+const DEFAULT_IDLE_THRESHOLD_MS = 15000;
 class IdleService {
     detector;
     lastSessionTime = Date.now();
     isEnabled = true;
     storage;
     onIdleCallback;
-    constructor(storage, config = { thresholdMs: 15 * 1000 }) {
+    aiService = null;
+    constructor(storage, config = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, aiService) {
         this.detector = new idle_detector_1.IdleDetector(config);
         this.storage = storage;
+        this.aiService = aiService || null;
     }
     async initialize() {
         console.log('[IdleService] Initializing...');
@@ -6678,8 +6773,27 @@ class IdleService {
         // Potentially log a "Resume" event or just reset internal tracking
     }
     async generateSessionSummary(events) {
-        // Simple heuristic summary for now
-        // In a real implementation, this would call Gemini/LLM to summarize the events
+        // Try to use Gemini AI for intelligent summarization
+        if (this.aiService) {
+            try {
+                // Format events into an activity log
+                const activityLog = events.map(event => {
+                    const timestamp = new Date(event.timestamp).toLocaleTimeString();
+                    const eventType = event.event_type.replace(/_/g, ' ');
+                    const filePath = event.file_path || 'unknown';
+                    const details = event.metadata ? JSON.stringify(event.metadata) : '';
+                    return `[${timestamp}] ${eventType}: ${filePath}${details ? ` (${details})` : ''}`;
+                }).join('\n');
+                const summary = await this.aiService.summarize(activityLog);
+                console.log('[IdleService] Generated AI summary via Gemini');
+                return summary;
+            }
+            catch (error) {
+                console.warn('[IdleService] AI summary failed, falling back to heuristic:', error);
+                // Fall through to heuristic summary
+            }
+        }
+        // Fallback: Simple heuristic summary
         const fileEdits = events.filter(e => e.event_type === 'file_edit');
         const fileOpens = events.filter(e => e.event_type === 'file_open');
         const uniqueFiles = new Set(fileEdits.map(e => e.file_path));
@@ -6738,13 +6852,15 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.IdleDetector = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const events_1 = __webpack_require__(9);
+// Hardcoded idle threshold: 15 seconds exactly
+const DEFAULT_IDLE_THRESHOLD_MS = 15000;
 class IdleDetector extends events_1.EventEmitter {
     timer = null;
     thresholdMs;
     disposables = [];
     _isIdle = false;
     isMonitoring = false;
-    constructor(config = { thresholdMs: 60000 }) {
+    constructor(config = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }) {
         super();
         this.thresholdMs = config.thresholdMs;
     }
@@ -6863,6 +6979,7 @@ const events_1 = __webpack_require__(9);
 const vscode = __importStar(__webpack_require__(1));
 const symbolUtils_1 = __webpack_require__(16);
 const context_builder_1 = __webpack_require__(40);
+const GitService_1 = __webpack_require__(87);
 class ContextService extends events_1.EventEmitter {
     storage;
     aiService;
@@ -6880,7 +6997,7 @@ class ContextService extends events_1.EventEmitter {
             // 1. Fetch recent events from LanceDB
             const recentEvents = await this.storage.getRecentEvents(100);
             // 2. Process events into context structures
-            const gitContext = this.processGitEvents(recentEvents);
+            const gitContext = await this.processGitEvents(recentEvents);
             const fileContext = await this.collectFileContext(recentEvents);
             const timeline = this.processTimeline(recentEvents);
             const session = this.processSession(recentEvents);
@@ -6964,9 +7081,9 @@ class ContextService extends events_1.EventEmitter {
         return []; // Placeholder, actual logic is in processSession/collectContext
     }
     /**
-     * Process Git events from logs
+     * Process Git events from logs and get current git state
      */
-    processGitEvents(events) {
+    async processGitEvents(events) {
         const commits = events
             .filter(e => e.event_type === 'git_commit')
             .map(e => {
@@ -6978,10 +7095,52 @@ class ContextService extends events_1.EventEmitter {
                 date: new Date(e.timestamp),
             };
         });
+        // Get current branch and uncommitted changes from GitService
+        let currentBranch = undefined;
+        let uncommittedChanges = [];
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        if (workspaceRoot) {
+            try {
+                const gitService = new GitService_1.GitService(workspaceRoot);
+                // Get current branch
+                try {
+                    const branch = await gitService.getCurrentBranch();
+                    if (branch !== "unknown") {
+                        currentBranch = branch;
+                        console.log(`[ContextService] Current branch: ${branch}`);
+                    }
+                    else {
+                        console.warn("[ContextService] Could not determine current git branch");
+                    }
+                }
+                catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    console.error(`[ContextService] Failed to get current branch: ${errorMsg}`, error);
+                }
+                // Get uncommitted changes
+                try {
+                    uncommittedChanges = await gitService.getUncommittedChanges();
+                    if (uncommittedChanges.length > 0) {
+                        console.log(`[ContextService] Found ${uncommittedChanges.length} uncommitted changes`);
+                    }
+                }
+                catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    console.error(`[ContextService] Failed to get uncommitted changes: ${errorMsg}`, error);
+                }
+            }
+            catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                console.error(`[ContextService] Failed to initialize GitService: ${errorMsg}`, error);
+            }
+        }
+        else {
+            console.warn("[ContextService] No workspace root found, skipping git state collection");
+        }
         return {
             recentCommits: commits,
-            currentBranch: 'main', // TODO: Use simple-git or VS Code Git extension API for real branch
-            uncommittedChanges: [], // TODO: Use simple-git for status
+            currentBranch: currentBranch,
+            uncommittedChanges: uncommittedChanges,
         };
     }
     /**
@@ -17720,10 +17879,41 @@ class GitService {
     async getCurrentBranch() {
         try {
             const { stdout } = await execPromise('git branch --show-current', { cwd: this.repoPath });
-            return stdout.trim();
+            const branch = stdout.trim();
+            return branch || "unknown";
         }
         catch (e) {
+            console.warn(`[GitService] Failed to get current branch: ${e instanceof Error ? e.message : String(e)}`);
             return "unknown";
+        }
+    }
+    async getUncommittedChanges() {
+        try {
+            // Get list of modified, added, and deleted files
+            const { stdout: statusStdout } = await execPromise('git status --porcelain', { cwd: this.repoPath });
+            if (!statusStdout || !statusStdout.trim()) {
+                return [];
+            }
+            // Parse porcelain format: XY filename
+            // X = index status, Y = working tree status
+            // M = modified, A = added, D = deleted, R = renamed, C = copied
+            const changes = [];
+            const lines = statusStdout.trim().split('\n');
+            for (const line of lines) {
+                if (line.length < 3)
+                    continue;
+                const status = line.substring(0, 2);
+                const filePath = line.substring(3).trim();
+                // Only include files that have actual changes (not just untracked)
+                if (status[0] !== '?' && status[1] !== '?') {
+                    changes.push(filePath);
+                }
+            }
+            return changes;
+        }
+        catch (e) {
+            console.warn(`[GitService] Failed to get uncommitted changes: ${e instanceof Error ? e.message : String(e)}`);
+            return [];
         }
     }
     async createBranch(name) {
@@ -18031,6 +18221,36 @@ module.exports = require("node:util");
 /******/ 				() => (module);
 /******/ 			__webpack_require__.d(getter, { a: getter });
 /******/ 			return getter;
+/******/ 		};
+/******/ 	})();
+/******/ 	
+/******/ 	/* webpack/runtime/create fake namespace object */
+/******/ 	(() => {
+/******/ 		var getProto = Object.getPrototypeOf ? (obj) => (Object.getPrototypeOf(obj)) : (obj) => (obj.__proto__);
+/******/ 		var leafPrototypes;
+/******/ 		// create a fake namespace object
+/******/ 		// mode & 1: value is a module id, require it
+/******/ 		// mode & 2: merge all properties of value into the ns
+/******/ 		// mode & 4: return value when already ns object
+/******/ 		// mode & 16: return value when it's Promise-like
+/******/ 		// mode & 8|1: behave like require
+/******/ 		__webpack_require__.t = function(value, mode) {
+/******/ 			if(mode & 1) value = this(value);
+/******/ 			if(mode & 8) return value;
+/******/ 			if(typeof value === 'object' && value) {
+/******/ 				if((mode & 4) && value.__esModule) return value;
+/******/ 				if((mode & 16) && typeof value.then === 'function') return value;
+/******/ 			}
+/******/ 			var ns = Object.create(null);
+/******/ 			__webpack_require__.r(ns);
+/******/ 			var def = {};
+/******/ 			leafPrototypes = leafPrototypes || [null, getProto({}), getProto([]), getProto(getProto)];
+/******/ 			for(var current = mode & 2 && value; (typeof current == 'object' || typeof current == 'function') && !~leafPrototypes.indexOf(current); current = getProto(current)) {
+/******/ 				Object.getOwnPropertyNames(current).forEach((key) => (def[key] = () => (value[key])));
+/******/ 			}
+/******/ 			def['default'] = () => (value);
+/******/ 			__webpack_require__.d(ns, def);
+/******/ 			return ns;
 /******/ 		};
 /******/ 	})();
 /******/ 	
