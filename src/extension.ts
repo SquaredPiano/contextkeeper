@@ -3,6 +3,7 @@
 import * as vscode from "vscode";
 import { getLogsWithGitlog } from "./modules/gitlogs/gitlog";
 import { FileWatcher } from "./modules/gitlogs/fileWatcher";
+import { LintingService } from "./modules/gitlogs/LintingService";
 
 // Import mock services (INTEGRATION POINT: Replace with real services here)
 import { MockContextService } from "./services/mock/MockContextService";
@@ -35,6 +36,7 @@ let contextService: MockContextService;
 let aiService: IAIService;
 let gitService: MockGitService;
 let voiceService: MockVoiceService;
+let lintingService: LintingService;
 
 // State
 let currentContext: DeveloperContext | null = null;
@@ -49,6 +51,10 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Initialize services
   contextService = new MockContextService();
+  
+  // Initialize Linting Service
+  lintingService = new LintingService();
+  lintingService.initialize(contextService);
   
   // Initialize Gemini Service
   const geminiService = new GeminiService();
@@ -102,6 +108,7 @@ export function activate(context: vscode.ExtensionContext) {
     statusBar,
     treeView,
     webviewProvider,
+    lintingService,
   );
 
   // Load autonomous mode from settings
@@ -435,5 +442,9 @@ async function runAnalysis(): Promise<void> {
 // This method is called when your extension is deactivated
 export function deactivate() {
   console.log('Autonomous Copilot extension is being deactivated');
+  // Clean up linting service
+  if (lintingService) {
+    lintingService.dispose();
+  }
 }
 
