@@ -16,6 +16,10 @@
       {
         "command": "contextkeeper.helloWorld",
         "title": "Hello World"
+      },
+      {
+        "command": "contextkeeper.testGitlog",
+        "title": "ContextKeeper: Test Git Logs"
       }
     ]
   },
@@ -44,6 +48,7 @@
     "webpack-cli": "^6.0.1"
   },
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "^2.25.0"
+    "@elevenlabs/elevenlabs-js": "^2.25.0",
+    "gitlog": "^5.1.0"
   }
 }
