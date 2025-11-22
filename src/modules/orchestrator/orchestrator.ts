@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getLogsWithGitlog } from "../gitlogs/gitlog";
+import { GitService } from "../gitlogs/GitService";
 import { readAllFilesHandler, FileData } from "../gitlogs/fileReader";
 import { CloudflareClient, CloudflareLintResult } from "../cloudflare/client";
 import { GeminiClient } from "../gemini/gemini-client";
@@ -128,23 +128,84 @@ export class Orchestrator extends EventEmitter {
     this.emit("contextCollectionStarted");
 
     const context: CollectedContext = {
-      git: { commits: [] },
+      git: { commits: [], currentBranch: undefined, uncommittedChanges: [] },
       files: { allFiles: [], openFiles: [], recentlyEdited: [] },
       workspace: {},
       session: { startTime: this.sessionStartTime, totalEdits: this.totalEdits },
     };
 
-    // Try git logs
-    try {
-      const commits = await getLogsWithGitlog();
-      context.git.commits = commits || [];
-    } catch {}
+    // Get workspace root path first
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (workspaceRoot) {
+      context.workspace.rootPath = workspaceRoot;
+
+      // Collect git context using GitService (non-vscode dependent)
+      try {
+        const gitService = new GitService(workspaceRoot);
+        
+        // Get recent commits
+        try {
+          const commits = await gitService.getRecentCommits(10);
+          context.git.commits = commits || [];
+          if (commits.length === 0) {
+            console.warn("[Orchestrator] No git commits found. Repository may be empty or git not initialized.");
+          } else {
+            console.log(`[Orchestrator] Loaded ${commits.length} git commits`);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error(`[Orchestrator] Failed to load git commits: ${errorMsg}`, error);
+          this.emit("contextCollectionError", { type: "git_commits", error: errorMsg });
+        }
+
+        // Get current branch
+        try {
+          const branch = await gitService.getCurrentBranch();
+          context.git.currentBranch = branch !== "unknown" ? branch : undefined;
+          if (branch === "unknown") {
+            console.warn("[Orchestrator] Could not determine current git branch");
+          } else {
+            console.log(`[Orchestrator] Current branch: ${branch}`);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error(`[Orchestrator] Failed to get current branch: ${errorMsg}`, error);
+        }
+
+        // Get uncommitted changes
+        try {
+          const uncommitted = await gitService.getUncommittedChanges();
+          context.git.uncommittedChanges = uncommitted || [];
+          if (uncommitted.length > 0) {
+            console.log(`[Orchestrator] Found ${uncommitted.length} uncommitted changes`);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error(`[Orchestrator] Failed to get uncommitted changes: ${errorMsg}`, error);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[Orchestrator] Failed to initialize GitService: ${errorMsg}`, error);
+        this.emit("contextCollectionError", { type: "git_service", error: errorMsg });
+      }
+    } else {
+      console.warn("[Orchestrator] No workspace root found, skipping git context collection");
+    }
 
     // Try reading workspace files (no raw full sends)
     try {
       const files = await readAllFilesHandler();
       context.files.allFiles = files || [];
-    } catch {}
+      if (files.length === 0) {
+        console.warn("[Orchestrator] No files found in workspace");
+      } else {
+        console.log(`[Orchestrator] Loaded ${files.length} files from workspace`);
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[Orchestrator] Failed to read workspace files: ${errorMsg}`, error);
+      this.emit("contextCollectionError", { type: "file_reading", error: errorMsg });
+    }
 
     // Capture active editor info (file + cursor)
     const activeEditor = vscode.window.activeTextEditor;
@@ -163,15 +224,40 @@ export class Orchestrator extends EventEmitter {
       if (!doc.isUntitled) context.files.openFiles.push(doc.fileName);
     });
 
-    // Root project folder
-    if (vscode.workspace.workspaceFolders?.[0]) {
-      context.workspace.rootPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
-    }
-
     // Push recent edit history
     context.files.recentlyEdited = this.editHistory.slice(-20);
 
+    // Validate context collection
+    this.validateContext(context);
+
     return context;
+  }
+
+  /**
+   * Validates that context was collected properly and logs warnings for missing data
+   */
+  private validateContext(context: CollectedContext): void {
+    const warnings: string[] = [];
+
+    if (context.git.commits.length === 0) {
+      warnings.push("No git commits found");
+    }
+    if (!context.git.currentBranch) {
+      warnings.push("Current git branch not available");
+    }
+    if (context.files.allFiles.length === 0) {
+      warnings.push("No workspace files found");
+    }
+    if (!context.workspace.rootPath) {
+      warnings.push("No workspace root path");
+    }
+
+    if (warnings.length > 0) {
+      console.warn(`[Orchestrator] Context collection warnings: ${warnings.join(", ")}`);
+      this.emit("contextCollectionWarning", { warnings });
+    } else {
+      console.log("[Orchestrator] Context collection completed successfully");
+    }
   }
 
   /**

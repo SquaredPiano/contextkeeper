@@ -14,6 +14,7 @@ import {
 import { getDocumentSymbols, findFunctionAtPosition } from '../../utils/symbolUtils';
 import { ContextBuilder } from '../../modules/gemini/context-builder';
 import { RawLogInput } from '../../modules/gemini/types';
+import { GitService } from '../../modules/gitlogs/GitService';
 
 export class ContextService extends EventEmitter implements IContextService {
 	private storage: IStorageService;
@@ -35,7 +36,7 @@ export class ContextService extends EventEmitter implements IContextService {
 			const recentEvents = await this.storage.getRecentEvents(100);
 
 			// 2. Process events into context structures
-			const gitContext = this.processGitEvents(recentEvents);
+			const gitContext = await this.processGitEvents(recentEvents);
 			const fileContext = await this.collectFileContext(recentEvents);
 			const timeline = this.processTimeline(recentEvents);
 			const session = this.processSession(recentEvents);
@@ -138,9 +139,9 @@ export class ContextService extends EventEmitter implements IContextService {
 	}
 
 	/**
-	 * Process Git events from logs
+	 * Process Git events from logs and get current git state
 	 */
-	private processGitEvents(events: any[]): DeveloperContext['git'] {
+	private async processGitEvents(events: any[]): Promise<DeveloperContext['git']> {
 		const commits: GitCommit[] = events
 			.filter(e => e.event_type === 'git_commit')
 			.map(e => {
@@ -153,10 +154,51 @@ export class ContextService extends EventEmitter implements IContextService {
 				};
 			});
 
+		// Get current branch and uncommitted changes from GitService
+		let currentBranch: string | undefined = undefined;
+		let uncommittedChanges: string[] = [];
+
+		const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		if (workspaceRoot) {
+			try {
+				const gitService = new GitService(workspaceRoot);
+				
+				// Get current branch
+				try {
+					const branch = await gitService.getCurrentBranch();
+					if (branch !== "unknown") {
+						currentBranch = branch;
+						console.log(`[ContextService] Current branch: ${branch}`);
+					} else {
+						console.warn("[ContextService] Could not determine current git branch");
+					}
+				} catch (error) {
+					const errorMsg = error instanceof Error ? error.message : String(error);
+					console.error(`[ContextService] Failed to get current branch: ${errorMsg}`, error);
+				}
+
+				// Get uncommitted changes
+				try {
+					uncommittedChanges = await gitService.getUncommittedChanges();
+					if (uncommittedChanges.length > 0) {
+						console.log(`[ContextService] Found ${uncommittedChanges.length} uncommitted changes`);
+					}
+				} catch (error) {
+					const errorMsg = error instanceof Error ? error.message : String(error);
+					console.error(`[ContextService] Failed to get uncommitted changes: ${errorMsg}`, error);
+				}
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error);
+				console.error(`[ContextService] Failed to initialize GitService: ${errorMsg}`, error);
+			}
+		} else {
+			console.warn("[ContextService] No workspace root found, skipping git state collection");
+		}
+
 		return {
 			recentCommits: commits,
-			currentBranch: 'main', // TODO: Use simple-git or VS Code Git extension API for real branch
-			uncommittedChanges: [], // TODO: Use simple-git for status
+			currentBranch: currentBranch,
+			uncommittedChanges: uncommittedChanges,
 		};
 	}
 

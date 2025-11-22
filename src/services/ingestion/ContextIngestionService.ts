@@ -25,27 +25,53 @@ export class ContextIngestionService {
   }
 
   public async initialize(context: vscode.ExtensionContext, outputChannel?: vscode.OutputChannel): Promise<void> {
-    console.log('Initializing Context Ingestion Service...');
+    console.log('[ContextIngestionService] Initializing Context Ingestion Service...');
     if (outputChannel) {
       this.outputChannel = outputChannel;
-      this.outputChannel.appendLine('ContextIngestionService: Initializing...');
+      this.outputChannel.appendLine('[ContextIngestionService] Initializing...');
     }
 
     // Start the ingestion queue
-    this.queue.start();
+    try {
+      this.queue.start();
+      this.logToOutput('Ingestion queue started');
+      console.log('[ContextIngestionService] Ingestion queue started');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[ContextIngestionService] Failed to start ingestion queue: ${errorMsg}`, error);
+      this.logToOutput(`❌ Failed to start ingestion queue: ${errorMsg}`);
+    }
 
     // 1. Setup Git Watcher
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspaceRoot) {
-      this.gitWatcher = new GitWatcher(workspaceRoot);
-      this.gitWatcher.on('commit', (commit: GitCommitEvent) => this.handleGitCommit(commit));
-      this.gitWatcher.start();
+      try {
+        this.gitWatcher = new GitWatcher(workspaceRoot);
+        this.gitWatcher.on('commit', (commit: GitCommitEvent) => this.handleGitCommit(commit));
+        await this.gitWatcher.start();
+        this.logToOutput(`Git watcher started for workspace: ${workspaceRoot}`);
+        console.log(`[ContextIngestionService] Git watcher started for workspace: ${workspaceRoot}`);
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
+        console.error(`[ContextIngestionService] Failed to start git watcher: ${errorMsg}`, error);
+        this.logToOutput(`⚠️  Git watcher failed to start: ${errorMsg}`);
+      }
     } else {
-      console.warn('No workspace root found, Git ingestion disabled.');
+      const warningMsg = 'No workspace root found, Git ingestion disabled.';
+      console.warn(`[ContextIngestionService] ${warningMsg}`);
+      this.logToOutput(`⚠️  ${warningMsg}`);
     }
 
     // 2. Setup VS Code Listeners
-    this.setupListeners();
+    try {
+      this.setupListeners();
+      this.logToOutput('VS Code listeners setup complete');
+      console.log('[ContextIngestionService] VS Code listeners setup complete');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[ContextIngestionService] Failed to setup listeners: ${errorMsg}`, error);
+      this.logToOutput(`❌ Failed to setup listeners: ${errorMsg}`);
+    }
 
     // 3. Capture initial state
     if (vscode.window.activeTextEditor) {
@@ -55,10 +81,16 @@ export class ContextIngestionService {
     // 4. Ensure Storage is Connected
     try {
       // await this.storage.connect(); // Assuming connection is handled externally
-      console.log('Storage connected for ingestion.');
+      console.log('[ContextIngestionService] Storage connected for ingestion.');
+      this.logToOutput('Storage connected for ingestion');
     } catch (error) {
-      console.error('Failed to connect storage for ingestion:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[ContextIngestionService] Failed to connect storage for ingestion: ${errorMsg}`, error);
+      this.logToOutput(`❌ Failed to connect storage: ${errorMsg}`);
     }
+
+    this.logToOutput('✅ Context Ingestion Service initialized');
+    console.log('[ContextIngestionService] ✅ Context Ingestion Service initialized');
   }
 
   public dispose(): void {
@@ -120,21 +152,25 @@ export class ContextIngestionService {
     if (this.shouldIgnoreFile(document.uri)) { return; }
 
     try {
+      const relativePath = vscode.workspace.asRelativePath(document.uri);
       this.queue.enqueue({
         type: 'event',
         data: {
           timestamp: Date.now(),
           event_type: 'file_open',
-          file_path: vscode.workspace.asRelativePath(document.uri),
+          file_path: relativePath,
           metadata: JSON.stringify({
             languageId: document.languageId,
             lineCount: document.lineCount
           })
         }
       });
-      this.logToOutput(`[FILE_OPEN] ${vscode.workspace.asRelativePath(document.uri)}`);
+      this.logToOutput(`[FILE_OPEN] ${relativePath}`);
+      console.log(`[ContextIngestionService] File opened: ${relativePath}`);
     } catch (error) {
-      console.error('Error logging file_open:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[ContextIngestionService] Error logging file_open: ${errorMsg}`, error);
+      this.logToOutput(`❌ Error logging file_open: ${errorMsg}`);
     }
   }
 
@@ -142,20 +178,24 @@ export class ContextIngestionService {
     if (this.shouldIgnoreFile(document.uri)) { return; }
 
     try {
+      const relativePath = vscode.workspace.asRelativePath(document.uri);
       this.queue.enqueue({
         type: 'event',
         data: {
           timestamp: Date.now(),
           event_type: 'file_close',
-          file_path: vscode.workspace.asRelativePath(document.uri),
+          file_path: relativePath,
           metadata: JSON.stringify({
             languageId: document.languageId
           })
         }
       });
-      this.logToOutput(`[FILE_CLOSE] ${vscode.workspace.asRelativePath(document.uri)}`);
+      this.logToOutput(`[FILE_CLOSE] ${relativePath}`);
+      console.log(`[ContextIngestionService] File closed: ${relativePath}`);
     } catch (error) {
-      console.error('Error logging file_close:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[ContextIngestionService] Error logging file_close: ${errorMsg}`, error);
+      this.logToOutput(`❌ Error logging file_close: ${errorMsg}`);
     }
   }
 
@@ -300,8 +340,11 @@ export class ContextIngestionService {
       console.log(`[ContextIngestion] Queued action for embedding: "${description.substring(0, 100)}..."`);
 
       this.logToOutput(`[FILE_EDIT] ${relativePath} (${changes.length} changes)${affectedFunctionsList.length > 0 ? ` in ${affectedFunctionsList.join(', ')}` : ''}`);
+      console.log(`[ContextIngestionService] File edited: ${relativePath} (${changes.length} changes)${affectedFunctionsList.length > 0 ? ` in ${affectedFunctionsList.join(', ')}` : ''}`);
     } catch (error) {
-      console.error('Error logging file_edit:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[ContextIngestionService] Error logging file_edit: ${errorMsg}`, error);
+      this.logToOutput(`❌ Error logging file_edit: ${errorMsg}`);
     }
   }
 
@@ -334,10 +377,12 @@ export class ContextIngestionService {
         }
       });
 
-      this.logToOutput(`[GIT_COMMIT] ${commit.hash} - ${commit.message}`);
-      console.log(`Logged git commit: ${commit.hash}`);
+      this.logToOutput(`[GIT_COMMIT] ${commit.hash} - ${commit.message} (${commit.files.length} files)`);
+      console.log(`[ContextIngestionService] Logged git commit: ${commit.hash} - ${commit.message} (${commit.files.length} files)`);
     } catch (error) {
-      console.error('Error logging git_commit:', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      console.error(`[ContextIngestionService] Error logging git_commit: ${errorMsg}`, error);
+      this.logToOutput(`❌ Error logging git_commit: ${errorMsg}`);
     }
   }
 

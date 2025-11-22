@@ -1,7 +1,6 @@
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { GeminiModule } from './index';
 import { PromptTemplates } from './prompts';
-import { GeminiContext, Analysis, CodeFix, BatchAnalysisResult } from './types';
+import { GeminiContext, Analysis, CodeFix, BatchAnalysisResult, GeminiModule } from './types';
 import { parseJsonFromText } from './utils';
 
 export class GeminiClient implements GeminiModule {
@@ -15,6 +14,13 @@ export class GeminiClient implements GeminiModule {
 
   async initialize(apiKey: string, modelName: string = "gemini-2.5-flash"): Promise<void> {
     this.apiKey = apiKey;
+    
+    // If already in mock mode, don't create real client
+    if (this.modelName === "mock") {
+      this.ready = true;
+      return;
+    }
+    
     this.modelName = modelName;
     this.genAI = new GoogleGenerativeAI(this.apiKey);
     this.model = this.genAI.getGenerativeModel({ model: this.modelName });
@@ -28,6 +34,8 @@ export class GeminiClient implements GeminiModule {
   enableMockMode(): void {
     this.modelName = "mock";
     this.model = null; // Ensure we don't use the real model
+    this.genAI = null; // Don't create real API client
+    // Don't set ready here - let initialize() do it, or set it manually if not calling initialize
   }
 
   private async rateLimit() {

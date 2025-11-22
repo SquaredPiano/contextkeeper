@@ -22,9 +22,11 @@ async function demo() {
   const client = new GeminiClient();
   const apiKey = process.env.GEMINI_API_KEY || "";
   
-  if (!apiKey) {
+  if (!apiKey || apiKey.trim() === "") {
     console.log("⚠️  No GEMINI_API_KEY found in .env, using MOCK mode");
+    // Enable mock mode BEFORE initializing
     client.enableMockMode();
+    // Initialize in mock mode - the initialize() method will now respect mock mode
     await client.initialize("mock-key");
   } else {
     console.log("🔑 API Key found, initializing real client...");

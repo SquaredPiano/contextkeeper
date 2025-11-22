@@ -4,6 +4,7 @@ import * as cp from 'child_process';
 import * as util from 'util';
 
 const exec = util.promisify(cp.exec);
+import { GitService } from '../../modules/gitlogs/GitService';
 
 export interface GitCommitEvent {
   hash: string;
@@ -51,9 +52,11 @@ export class GitWatcher extends EventEmitter {
   private disposables: vscode.Disposable[] = [];
   private lastCommitHash: string | undefined;
   private repository: Repository | undefined;
+  private gitService: GitService;
 
   constructor(private workspaceRoot: string) {
     super();
+    this.gitService = new GitService(workspaceRoot);
   }
 
   public async start(): Promise<void> {
@@ -122,15 +125,36 @@ export class GitWatcher extends EventEmitter {
               if (commits.length > 0) {
                   const commit = commits[0];
                   
-                  // Fetch changed files using git CLI
+                  // Get file list from GitService
                   let files: string[] = [];
                   try {
-                      const { stdout } = await exec(`git show --name-only --pretty="" ${commit.hash}`, { cwd: this.workspaceRoot });
-                      files = stdout.split('\n').filter(line => line.trim() !== '');
-                  } catch (gitError) {
-                      console.error('Error fetching changed files via git CLI:', gitError);
+                      // Use git show to get files changed in this commit
+                      const { exec } = await import('child_process');
+                      const { promisify } = await import('util');
+                      const execAsync = promisify(exec);
+                      
+                      const { stdout } = await execAsync(
+                          `git show --name-only --pretty=format: ${commit.hash}`,
+                          { cwd: this.workspaceRoot, timeout: 2000 }
+                      );
+                      
+                      files = stdout
+                          .trim()
+                          .split('\n')
+                          .filter(line => line.trim().length > 0 && !line.startsWith('commit'));
+                  } catch (fileError) {
+                      console.warn(`[GitWatcher] Failed to get files for commit ${commit.hash}:`, fileError);
+                      // Fallback: try to get files from recent commits using GitService
+                      try {
+                          const recentCommits = await this.gitService.getRecentCommits(1);
+                          if (recentCommits.length > 0 && recentCommits[0].hash === commit.hash) {
+                              files = recentCommits[0].files || [];
+                          }
+                      } catch (fallbackError) {
+                          console.warn(`[GitWatcher] Fallback file retrieval also failed:`, fallbackError);
+                      }
                   }
-
+                  
                   const event: GitCommitEvent = {
                       hash: commit.hash,
                       message: commit.message,
@@ -139,10 +163,12 @@ export class GitWatcher extends EventEmitter {
                       files: files
                   };
                   
+                  console.log(`[GitWatcher] Emitting commit event: ${commit.hash} with ${files.length} files`);
                   this.emit('commit', event);
               }
           } catch (e) {
-              console.error('Error fetching commit details:', e);
+              const errorMsg = e instanceof Error ? e.message : String(e);
+              console.error(`[GitWatcher] Error fetching commit details: ${errorMsg}`, e);
           }
       }
   }

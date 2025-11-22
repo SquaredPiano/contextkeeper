@@ -151,7 +151,19 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "demo": "tsx demo.ts",
+    "demo:menu": "tsx demo.ts menu",
+    "demo:gemini": "tsx src/modules/gemini/demo.ts",
+    "demo:voice": "tsx src/modules/elevenlabs/demo.ts",
+    "demo:elevenlabs": "tsx src/modules/elevenlabs/demo.ts",
+    "demo:git": "tsx src/modules/gitlogs/demo.ts",
+    "demo:gitlogs": "tsx src/modules/gitlogs/demo.ts",
+    "demo:orchestrator": "tsx src/modules/orchestrator/demo.ts",
+    "demo:ingestion": "tsx src/demo-full-ingestion.ts",
+    "demo:idle": "tsx src/modules/idle-detector/demo.ts",
+    "demo:extension": "tsx demo.ts extension",
+    "demo:all": "tsx demo.ts all"
   },
   "devDependencies": {
     "@types/node": "22.x",
@@ -164,6 +176,7 @@
     "jest": "^30.2.0",
     "ts-jest": "^29.4.5",
     "ts-loader": "^9.5.4",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.3",
     "vitest": "^4.0.13",
