@@ -1,35 +1,35 @@
-export function calculateTotal(items: any[]) {
-  let total = 0;
-  for (let i = 0; i < items.length; i++) {
-    // Bug: Potential undefined access if price is missing
-    // Bug: String concatenation if price is a string
-    total += items[i].price;
-  }
-  return total;
+// examples/buggy-code.ts
+
+interface User {
+  id: string;
+  email?: string;
+  age: number | null;
 }
 
-export function getUserData(userId: string) {
-  // Bug: No error handling for fetch
-  const response = fetch(`/api/users/${userId}`);
-  // Bug: response.json() is async, missing await
-  const data = response.json();
-  return data;
-}
-
-export class UserManager {
-  private users: any[];
-
-  constructor() {
-    this.users = [];
+export function processUser(data: any) {
+  // Validate top-level shape first
+  const user = data?.user;
+  if (!user || typeof user !== 'object') {
+    throw new TypeError('Missing or invalid `user` object');
   }
 
-  addUser(user: any) {
-    // Bug: No validation
-    this.users.push(user);
+  // Validate id early — return null (or throw) if invalid
+  const id = String(user.id ?? '');
+  if (id.length < 5) {
+    console.warn('Invalid id');
+    return null;
   }
 
-  findUser(email: string) {
-    // Bug: potential crash if user or email is null
-    return this.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-  }
+  // Safely normalize email if present
+  const rawEmail = typeof user.email === 'string' ? user.email : null;
+  const normalizedEmail = rawEmail ? rawEmail.toLowerCase() : null;
+
+  // Safely compute age in months; return null when not available
+  const age = typeof user.age === 'number' ? user.age : null;
+  const ageInMonths = age !== null ? age * 12 : null;
+
+  return {
+    email: normalizedEmail,
+    months: ageInMonths
+  };
 }

@@ -1,0 +1,34 @@
+// src/modules/gemini/types.ts
+
+export interface CodeContext {
+  recentCommits: number;
+  editCount: number;
+  relatedFiles: string[];
+}
+
+export interface AnalysisIssue {
+  line: number;
+  severity: "error" | "warning";
+  message: string;
+}
+
+export interface Analysis {
+  issues: AnalysisIssue[];
+  suggestions: string[];
+  risk_level: "low" | "medium" | "high";
+}
+
+export interface CodeFix {
+  fixedCode: string;
+  confidence: number;
+}
+
+export interface GeminiModule {
+  initialize(apiKey: string): Promise<void>;
+  analyzeCode(code: string, context: CodeContext): Promise<Analysis>;
+  generateTests(code: string): Promise<string>;
+  fixError(code: string, error: string): Promise<CodeFix>;
+
+  isReady(): boolean;
+  enableMockMode(): void;
+}

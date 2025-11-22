@@ -1,3 +1,9 @@
+import { VoiceType, ElevenLabsModule } from './index';
+import * as vscode from 'vscode';
+import { getVoiceId } from './voices';
+import { MockPlayer } from './mock';
+import { promises as fs } from 'fs';
+import * as os from 'os';
 import { IVoiceService } from '../../services/interfaces';
 import fetch from 'node-fetch';
 import * as fs from 'fs';
@@ -42,45 +48,73 @@ export class ElevenLabsService implements IVoiceService {
     }
 
     try {
-      console.log(`Generating speech for: "${text.substring(0, 50)}..."`);
-
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${this.voiceId}`, {
-        method: 'POST',
-        headers: {
-          'xi-api-key': this.apiKey,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          text: text,
-          model_id: "eleven_monolingual_v1",
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.5
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`ElevenLabs API error: ${response.statusText}`);
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      const tempFile = path.join(os.tmpdir(), `contextkeeper-speech-${Date.now()}.mp3`);
-      fs.writeFileSync(tempFile, buffer);
-
-      console.log(`Audio saved to ${tempFile}, playing...`);
-      this.playAudio(tempFile);
-
+      await this.performSpeak(item.text, item.voice);
+      item.resolve();
     } catch (error) {
-      console.error('ElevenLabs Speech Generation Error:', error);
+      console.error(`Error speaking "${item.text}":`, error);
+      // Don't reject the promise to avoid unhandled rejections crashing the extension,
+      // just log it. Or we could reject if the caller wants to handle it.
+      // For now, let's resolve so the queue continues.
+      item.resolve(); 
+    } finally {
+      this.isProcessing = false;
+      // Process next item
+      this.processQueue();
     }
   }
 
-  private playAudio(filePath: string) {
-    // Cross-platform audio player
-    const platform = os.platform();
-    let command = '';
+  private async performSpeak(text: string, voice: VoiceType): Promise<void> {
+    // Respect user preferences: global voice enabled + ElevenLabs-specific enabled
+    const globalVoice = vscode.workspace.getConfiguration('copilot').get('voice.enabled', true);
+    const elevenEnabled = vscode.workspace.getConfiguration('copilot').get('voice.elevenEnabled', true);
+
+    if (!globalVoice || !elevenEnabled || this.fallbackMode || !this.apiKey) {
+      await this.mock.play(text, voice);
+      return;
+    }
+
+    const voiceId = getVoiceId(voice);
+
+    // Make the request to ElevenLabs TTS endpoint.
+    const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`;
+    const body = JSON.stringify({ text });
+
+    console.log(`[ElevenLabs] Requesting TTS for: "${text}" (Voice: ${voiceId})`);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'xi-api-key': this.apiKey,
+        'Content-Type': 'application/json'
+      },
+      body
+    });
+
+    if (!res.ok) {
+      // If the API returns an error, fall back to console logging
+      console.warn(`ElevenLabs API error: ${res.status} ${res.statusText}`);
+      await this.mock.play(text, voice);
+      return;
+    }
+
+    const audioData = await res.arrayBuffer();
+    await this.playAudio(audioData);
+  }
+
+  private async playAudio(data: ArrayBuffer): Promise<void> {
+    // Write to temporary file and play using platform-native tool
+    const buffer = Buffer.from(data);
+    const tmpDir = os.tmpdir();
+    const fileName = `elevenlabs_${Date.now()}.mp3`;
+    const filePath = path.join(tmpDir, fileName);
+
+    await fs.writeFile(filePath, buffer);
+
+    console.log(`[Audio] Playing ${fileName}...`);
+
+    const platform = process.platform;
+    let cmd: string;
+    let args: string[] = [];
 
     if (platform === 'darwin') {
       command = `afplay "${filePath}"`;

@@ -1,438 +1,364 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
 	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
-	<title>Autonomous Copilot Dashboard</title>
+	<title>Copilot — Dashboard</title>
 	<style>
-		:root {
-			--container-padding: 16px;
-			--card-gap: 12px;
-			--border-radius: 6px;
-		}
+		/* theme variables only */
 
 		body {
-			padding: var(--container-padding);
 			color: var(--vscode-foreground);
-			background-color: var(--vscode-editor-background);
+			background: var(--vscode-sideBar-background);
 			font-family: var(--vscode-font-family);
-			font-size: var(--vscode-font-size);
-			line-height: 1.5;
+			font-size: 13px;
+			margin: 0;
+			padding: 1rem;
 		}
 
-		h2 {
-			font-size: 1.2em;
-			margin: 0 0 12px 0;
-			color: var(--vscode-foreground);
-			font-weight: 600;
+		.section { margin-bottom: 1.25rem; }
+
+		.title { font-size: 13px; margin: 0 0 0.5rem 0; color: var(--vscode-editor-foreground); font-weight: 600; }
+
+		/* Developer context: flat rows, label (small faint italic) above value */
+		.dev-list { display: flex; flex-direction: column; gap: 6px; }
+
+		.info-row { display: flex; flex-direction: column; padding: 4px 0; border-bottom: 1px solid var(--vscode-panel-border); }
+		.info-row .label { font-size: 12px; color: var(--vscode-descriptionForeground); font-style: italic; margin-bottom: 4px; }
+		.info-row .value { font-size: 13px; color: var(--vscode-foreground); }
+
+		/* Stat row: compact flat boxes — equal size and single-line titles */
+		.stats { margin-top: 0.75rem; display: flex; gap: 0.6rem; }
+		.stat { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding: 8px 10px; border: 1px solid var(--vscode-panel-border); border-radius: 3px; flex: 1 1 0; min-width: 0; min-height: 56px; box-sizing: border-box; background: var(--vscode-sideBar-background); color: var(--vscode-foreground); font-size: 13px; }
+		.stat .muted { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 100%; }
+
+		/* Actions */
+		.actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; align-items: center; flex-wrap: nowrap; overflow: hidden; }
+		/* unified rectangle style for action controls */
+		.action-item { display:flex; align-items:center; justify-content:center; flex: 1 1 0; min-width: 0; height:34px; padding:6px 10px; border: 1px solid var(--vscode-button-border); border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font-size: 12px; cursor: pointer; box-sizing: border-box; overflow: hidden; }
+		.action-item.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+		/* number input styled to match rectangle look */
+		#autonomyDelayInput { width:56px; height:22px; padding:2px 6px; border: none; background: transparent; color: inherit; font-size: 12px; text-align:center; outline: none; appearance: none; -webkit-appearance: none; -moz-appearance: textfield; flex: 0 1 40px; min-width: 24px; }
+		#autonomyDelayInput::-webkit-outer-spin-button, #autonomyDelayInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+		.secs-label { font-size: 12px; color: var(--vscode-descriptionForeground); white-space: nowrap; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+		/* Keep the left 'Every' label fully visible; let the numeric input shrink first */
+		.action-item.autonomy .secs-label:first-of-type {
+			flex: 0 0 auto;
+			white-space: nowrap;
+			overflow: visible;
+			text-overflow: unset;
+			margin-right: 6px;
 		}
 
-		.dashboard {
-			display: flex;
-			flex-direction: column;
-			gap: 24px;
-		}
+		/* ensure autonomy input container keeps the label visible and centered */
+		.action-item.autonomy { display:flex; align-items:center; gap:6px; justify-content:center; text-align:center; }
+		/* make children inline-block so centering + ellipsis behave predictably */
+		.action-item.autonomy > * { display: inline-block; vertical-align: middle; }
+		.action-item.autonomy .secs-label { text-align: center; }
 
-		.section {
-			display: flex;
-			flex-direction: column;
-			gap: var(--card-gap);
-		}
+		/* Issues / Analysis minimal */
+		.issue-list { margin-top: 0.5rem; }
+		.issue-item { padding: 6px 0; border-bottom: 1px solid var(--vscode-panel-border); color: var(--vscode-foreground); font-size: 12px; }
 
-		.card {
-			background-color: var(--vscode-editor-inactiveSelectionBackground);
-			border: 1px solid var(--vscode-panel-border);
-			border-radius: var(--border-radius);
-			padding: 12px;
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-		}
+		.small-muted { font-size: 12px; color: var(--vscode-descriptionForeground); }
 
-		.card .label {
-			color: var(--vscode-descriptionForeground);
-			font-size: 0.9em;
-		}
+		/* Risk meter */
+		.risk-row { display:flex; align-items:center; gap:8px; }
+		.risk-number { font-weight:600; font-size:13px; }
+		.risk-bar { width:120px; height:8px; background: var(--vscode-panel-border); border-radius:3px; overflow:hidden; }
+		.risk-fill { height:100%; width:0%; background: #28a745; border-radius:3px; }
 
-		.card .value {
-			font-weight: 600;
-			color: var(--vscode-foreground);
-		}
+		/* Sound UI states use theme tokens only */
+		.sound-on { color: var(--vscode-button-foreground); font-weight: 600; }
+		.sound-off { color: var(--vscode-descriptionForeground); font-weight: 600; }
 
-		.badge {
-			display: inline-block;
-			padding: 2px 8px;
-			border-radius: 12px;
-			font-size: 0.85em;
-			font-weight: 600;
-		}
-
-		.badge.error {
-			background-color: var(--vscode-inputValidation-errorBackground);
-			color: var(--vscode-inputValidation-errorForeground);
-			border: 1px solid var(--vscode-inputValidation-errorBorder);
-		}
-
-		.badge.warning {
-			background-color: var(--vscode-inputValidation-warningBackground);
-			color: var(--vscode-inputValidation-warningForeground);
-			border: 1px solid var(--vscode-inputValidation-warningBorder);
-		}
-
-		.badge.info {
-			background-color: var(--vscode-inputValidation-infoBackground);
-			color: var(--vscode-inputValidation-infoForeground);
-			border: 1px solid var(--vscode-inputValidation-infoBorder);
-		}
-
-		.badge.low { background-color: #28a745; color: white; }
-		.badge.medium { background-color: #ffc107; color: black; }
-		.badge.high { background-color: #dc3545; color: white; }
-
-		.issue-list {
-			display: flex;
-			flex-direction: column;
-			gap: 8px;
-		}
-
-		.issue-item {
-			background-color: var(--vscode-list-hoverBackground);
-			border-left: 3px solid;
-			padding: 10px 12px;
-			border-radius: var(--border-radius);
-			cursor: pointer;
-			transition: background-color 0.2s;
-		}
-
-		.issue-item:hover {
-			background-color: var(--vscode-list-activeSelectionBackground);
-		}
-
-		.issue-item.error { border-left-color: var(--vscode-editorError-foreground); }
-		.issue-item.warning { border-left-color: var(--vscode-editorWarning-foreground); }
-		.issue-item.info { border-left-color: var(--vscode-editorInfo-foreground); }
-
-		.issue-header {
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-			margin-bottom: 4px;
-		}
-
-		.issue-title {
-			font-weight: 600;
-			font-size: 0.95em;
-		}
-
-		.issue-location {
-			color: var(--vscode-descriptionForeground);
-			font-size: 0.85em;
-		}
-
-		.issue-message {
-			color: var(--vscode-descriptionForeground);
-			font-size: 0.9em;
-			margin-top: 4px;
-		}
-
-		.actions {
-			display: flex;
-			flex-direction: column;
-			gap: 12px;
-		}
-
-		button {
-			padding: 10px 16px;
-			border: 1px solid var(--vscode-button-border);
-			border-radius: var(--border-radius);
-			cursor: pointer;
-			font-family: var(--vscode-font-family);
-			font-size: var(--vscode-font-size);
-			transition: all 0.2s;
-		}
-
-		button.primary {
-			background-color: var(--vscode-button-background);
-			color: var(--vscode-button-foreground);
-		}
-
-		button.primary:hover {
-			background-color: var(--vscode-button-hoverBackground);
-		}
-
-		button.secondary {
-			background-color: var(--vscode-button-secondaryBackground);
-			color: var(--vscode-button-secondaryForeground);
-		}
-
-		button.secondary:hover {
-			background-color: var(--vscode-button-secondaryHoverBackground);
-		}
-
-		button:disabled {
-			opacity: 0.5;
-			cursor: not-allowed;
-		}
-
-		.toggle-button {
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-		}
-
-		.empty-state {
-			text-align: center;
-			padding: 32px 16px;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		.empty-state-icon {
-			font-size: 3em;
-			margin-bottom: 12px;
-		}
-
-		.loading {
-			text-align: center;
-			padding: 20px;
-			color: var(--vscode-descriptionForeground);
-		}
-
-		.spinner {
-			display: inline-block;
-			width: 20px;
-			height: 20px;
-			border: 3px solid var(--vscode-descriptionForeground);
-			border-top-color: transparent;
-			border-radius: 50%;
-			animation: spin 1s linear infinite;
-			margin-right: 8px;
-		}
-
-		@keyframes spin {
-			to { transform: rotate(360deg); }
+		/* Responsive: allow stacking at very small widths */
+		@media (max-width: 320px) {
+			.actions { flex-wrap: wrap; }
+			.action-item { flex: 1 1 100%; width: 100%; min-width: 0; }
+			/* Make autonomy internals flow naturally when stacked */
+			.action-item.autonomy { justify-content: center; padding: 8px 10px; text-align:center; }
+			/* Allow the 'Every' label to wrap instead of ellipsing when stacked */
+			.action-item.autonomy .secs-label { white-space: normal; overflow: visible; text-overflow: unset; }
 		}
 	</style>
 </head>
 <body>
-	<div class="dashboard">
-		<!-- Context Summary Section -->
-		<div class="section">
-			<h2>Developer Context</h2>
-			<div class="card">
-				<span class="label">Active File:</span>
-				<span class="value" id="activeFile">Loading...</span>
-			</div>
-			<div class="card">
-				<span class="label">Files Edited:</span>
-				<span class="value" id="filesEdited">0</span>
-			</div>
-			<div class="card">
-				<span class="label">Total Edits:</span>
-				<span class="value" id="totalEdits">0</span>
-			</div>
-			<div class="card">
-				<span class="label">Current Branch:</span>
-				<span class="value" id="currentBranch">-</span>
-			</div>
-			<div class="card">
-				<span class="label">Uncommitted Changes:</span>
-				<span class="value" id="uncommittedChanges">0 files</span>
-			</div>
-		</div>
 
-		<!-- AI Analysis Section -->
-		<div class="section">
-			<h2>AI Analysis</h2>
-			<div class="card">
-				<span class="label">Issues Found:</span>
-				<span class="value" id="issuesCount">0</span>
-			</div>
-			<div class="card">
-				<span class="label">Risk Level:</span>
-				<span class="value">
-					<span class="badge" id="riskBadge">-</span>
-				</span>
-			</div>
-			<div class="card">
-				<span class="label">Confidence:</span>
-				<span class="value" id="confidence">-</span>
+	<div class="section" id="contextSection">
+		<div class="title">Developer Context</div>
+
+		<div class="dev-list">
+			<div class="info-row">
+				<div class="label">Last File</div>
+				<div class="value" id="activeFile">-</div>
 			</div>
 
-			<div id="issuesContainer">
-				<div class="empty-state">
-					<div class="empty-state-icon">🔍</div>
-					<div>Run analysis to see issues and suggestions</div>
+			<div class="info-row">
+				<div class="label">Branch</div>
+				<div class="value" id="currentBranch">-</div>
+			</div>
+
+			<div class="info-row">
+				<div class="label">Last Line</div>
+				<div class="value" id="lastLine">-</div>
+			</div>
+
+			<div class="info-row">
+				<div class="label">Summary</div>
+				<div class="value small-muted" id="analysisSummary">No summary yet.</div>
+			</div>
+
+			<div class="stats" id="statsRow">
+				<div class="stat">
+					<div class="muted">Edits</div>
+					<div id="totalEdits">0</div>
+				</div>
+				<div class="stat">
+					<div class="muted">Files Edited</div>
+					<div id="filesEdited">0</div>
+				</div>
+				<div class="stat">
+					<div class="muted">Uncommitted</div>
+					<div id="uncommittedChanges">0</div>
+				</div>
+			</div>
+
+			<div class="actions" style="align-items:center;">
+				<button id="refreshContextBtn" class="action-item">Refresh</button>
+				<button id="toggleSoundBtn" class="action-item">Sound: <span id="soundStatus" class="sound-on">ON</span></button>
+				<button id="toggleNotifBtn" class="action-item">Notifs: <span id="notifStatus" class="sound-on">ON</span></button>
+				<div class="action-item autonomy" style="padding:4px 8px; gap:6px; justify-content:center;">
+					<span class="secs-label">Every</span>
+					<input id="autonomyDelayInput" type="number" min="0" step="1" aria-label="Autonomy delay in seconds" title="Seconds until autonomy starts" />
+					<span class="secs-label">s</span>
 				</div>
 			</div>
 		</div>
+	</div>
 
-		<!-- Actions Section -->
-		<div class="section">
-			<h2>Actions</h2>
-			<div class="actions">
-				<button id="analyzeBtn" class="primary">
-					🔍 Analyze Now
-				</button>
-				<button id="toggleAutoBtn" class="secondary toggle-button">
-					<span>Autonomous Mode:</span>
-					<span id="autoStatus" style="font-weight: 600;">OFF</span>
-				</button>
-				<button id="refreshContextBtn" class="secondary">
-					🔄 Refresh Context
-				</button>
+	<div class="section" id="issuesSection">
+		<div class="title">Issues Found</div>
+
+		<div class="info-row" style="border-bottom:0; padding:0;">
+			<div style="display:flex; gap:12px; align-items:center;">
+				<div class="small-muted">Issues</div>
+				<div id="issuesCount">0</div>
 			</div>
+			<div class="risk-row" style="margin-top:6px;">
+				<div class="small-muted">Risk</div>
+				<div id="riskNumber" class="risk-number">0/10</div>
+				<div class="risk-bar"><div id="riskFill" class="risk-fill"></div></div>
+			</div>
+
+			<!-- Issues list: re-introduced so analysis can render below 'Issues Found' -->
+			<div id="issuesContainer" class="issue-list"><div class="small-muted">No issues found.</div></div>
+		</div>
+		
+		<!-- issues container removed -->
+	</div>
+
+	<!-- Extension Changes: list of changes performed by the extension while the webview was closed/away -->
+	<div class="section" id="extensionChangesSection">
+		<div class="title">Recent Changes</div>
+		<div class="info-row" style="border-bottom:0; padding:0;">
+			<!-- subtitle removed per request -->
+			<div style="display:flex; gap:12px; align-items:center; margin-top:6px;">
+				<div class="small-muted">Changes</div>
+				<div id="extensionChangesCount">0</div>
+			</div>
+			<div id="extensionChangesContainer" class="issue-list"><div class="small-muted">No recorded changes.</div></div>
 		</div>
 	</div>
 
 	<script>
 		const vscode = acquireVsCodeApi();
 
-		// UI Elements
-		const elements = {
-			activeFile: document.getElementById('activeFile'),
-			filesEdited: document.getElementById('filesEdited'),
-			totalEdits: document.getElementById('totalEdits'),
-			currentBranch: document.getElementById('currentBranch'),
-			uncommittedChanges: document.getElementById('uncommittedChanges'),
-			issuesCount: document.getElementById('issuesCount'),
-			riskBadge: document.getElementById('riskBadge'),
-			confidence: document.getElementById('confidence'),
-			issuesContainer: document.getElementById('issuesContainer'),
-			analyzeBtn: document.getElementById('analyzeBtn'),
-			toggleAutoBtn: document.getElementById('toggleAutoBtn'),
-			autoStatus: document.getElementById('autoStatus'),
-			refreshContextBtn: document.getElementById('refreshContextBtn'),
-		};
+		const ids = ['activeFile','currentBranch','lastLine','analysisSummary','totalEdits','filesEdited','uncommittedChanges','refreshContextBtn','toggleSoundBtn','notifStatus','soundStatus','issuesCount','riskNumber','riskFill'];
+		const el = {};
+		ids.forEach(id => el[id] = document.getElementById(id));
+		const issuesContainerEl = document.getElementById('issuesContainer');
 
-		let isAutonomous = false;
-
-		// Button handlers
-		elements.analyzeBtn.addEventListener('click', () => {
-			vscode.postMessage({ type: 'triggerAnalysis' });
-			showLoading('Analyzing...');
-		});
-
-		elements.toggleAutoBtn.addEventListener('click', () => {
-			isAutonomous = !isAutonomous;
-			elements.autoStatus.textContent = isAutonomous ? 'ON' : 'OFF';
-			elements.autoStatus.style.color = isAutonomous ? '#28a745' : '';
-			vscode.postMessage({ type: 'toggleAutonomous', enabled: isAutonomous });
-		});
-
-		elements.refreshContextBtn.addEventListener('click', () => {
+		// Buttons
+		el.refreshContextBtn.addEventListener('click', () => {
 			vscode.postMessage({ type: 'requestContext' });
-			showLoading('Loading context...');
 		});
 
-		// Message handler
-		window.addEventListener('message', event => {
-			const message = event.data;
+		// Sound toggle state stored locally but extension is authoritative
+		const SOUND_KEY = 'elevenVoiceEnabled';
+		function setSoundUI(enabled) {
+			el.soundStatus.textContent = enabled ? 'ON' : 'OFF';
+			el.soundStatus.className = enabled ? 'sound-on' : 'sound-off';
+		}
 
-			switch (message.type) {
-				case 'contextUpdate':
-					updateContext(message.payload);
+		// Notifications toggle (controls whether extension shows pop-ups)
+		const NOTIF_KEY = 'copilotNotifsEnabled';
+		function setNotifUI(enabled){
+			const nEl = document.getElementById('notifStatus');
+			if (!nEl) return;
+			nEl.textContent = enabled ? 'ON' : 'OFF';
+			nEl.className = enabled ? 'sound-on' : 'sound-off';
+		}
+
+		// Autonomy delay input: initialize and wire to extension
+		const AUTONOMY_KEY = 'autonomyDelay';
+		const autonomyInput = document.getElementById('autonomyDelayInput');
+		function setAutonomyUI(seconds){
+			autonomyInput.value = String(seconds);
+		}
+		function sendAutonomyDelay(seconds){
+			vscode.postMessage({ type: 'setAutonomyDelay', seconds });
+		}
+		// init value (default 15s)
+		let _autoTimer = null;
+		function scheduleAutoAnalysis(seconds){
+			if (_autoTimer) clearInterval(_autoTimer);
+			if (!Number.isFinite(seconds) || seconds <= 0) return;
+			_autoTimer = setInterval(()=>{ vscode.postMessage({ type: 'triggerAnalysis' }); }, seconds * 1000);
+		}
+
+		try{
+			const stored = localStorage.getItem(AUTONOMY_KEY);
+			const val = stored === null ? 15 : Number(stored);
+			const initial = Number.isFinite(val) ? val : 15;
+			setAutonomyUI(initial);
+			// notify extension and schedule
+			sendAutonomyDelay(initial);
+			scheduleAutoAnalysis(initial);
+		} catch(e) { setAutonomyUI(15); sendAutonomyDelay(15); scheduleAutoAnalysis(15); }
+
+		autonomyInput.addEventListener('change', () => {
+			let v = Number(autonomyInput.value);
+			if (!Number.isFinite(v) || v < 0) v = 0;
+			v = Math.round(v);
+			try { localStorage.setItem(AUTONOMY_KEY, String(v)); } catch (e) {}
+			setAutonomyUI(v);
+			sendAutonomyDelay(v);
+			scheduleAutoAnalysis(v);
+		});
+
+		document.getElementById('toggleSoundBtn').addEventListener('click', () => {
+			let current = null;
+			try { current = localStorage.getItem(SOUND_KEY); } catch (e) {}
+			const next = current === null ? false : !(current === 'true');
+			try { localStorage.setItem(SOUND_KEY, String(next)); } catch (e) {}
+			setSoundUI(next);
+			vscode.postMessage({ type: 'setElevenVoice', enabled: next });
+		});
+
+		document.getElementById('toggleNotifBtn').addEventListener('click', () => {
+			let current = null;
+			try { current = localStorage.getItem(NOTIF_KEY); } catch (e) {}
+			const next = current === null ? false : !(current === 'true');
+			try { localStorage.setItem(NOTIF_KEY, String(next)); } catch (e) {}
+			setNotifUI(next);
+			vscode.postMessage({ type: 'setNotifications', enabled: next });
+		});
+
+		// Color interpolation helper (green -> dark red)
+		function lerp(a, b, t) { return a + (b - a) * t; }
+		function hexToRgb(hex){ hex = hex.replace('#',''); return [parseInt(hex.slice(0,2),16),parseInt(hex.slice(2,4),16),parseInt(hex.slice(4,6),16)]; }
+		function rgbToHex(r,g,b){ return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); }
+		function riskColor(value){
+			const low = hexToRgb('#28a745'); // green
+			const high = hexToRgb('#7a0000'); // dark red
+			const t = Math.max(0, Math.min(1, value/10));
+			const r = Math.round(lerp(low[0], high[0], t));
+			const g = Math.round(lerp(low[1], high[1], t));
+			const b = Math.round(lerp(low[2], high[2], t));
+			return rgbToHex(r,g,b);
+		}
+
+		// Receive messages from extension
+		window.addEventListener('message', e => {
+			const msg = e.data;
+			if (!msg || !msg.type) return;
+			switch (msg.type) {
+				case 'contextUpdate': updateContext(msg.payload); break;
+				case 'analysisComplete': updateAnalysis(msg.payload); break;
+				case 'extensionChanges': updateExtensionChanges(msg.payload); break;
+				case 'notificationsState':
+					try { localStorage.setItem(NOTIF_KEY, String(Boolean(msg.enabled))); } catch (e) {}
+					setNotifUI(Boolean(msg.enabled));
 					break;
-				case 'analysisComplete':
-					updateAnalysis(message.payload);
+				case 'elevenVoiceState':
+					try { localStorage.setItem(SOUND_KEY, String(Boolean(msg.enabled))); } catch (e) {}
+					setSoundUI(Boolean(msg.enabled));
 					break;
 				case 'stateChanged':
-					updateState(message.state);
-					break;
-				case 'error':
-					showError(message.message);
+					// no analyze button UI to update; extension state changes can be handled here if needed
 					break;
 			}
 		});
 
-		function updateContext(context) {
-			elements.activeFile.textContent = getFileName(context.files.activeFile);
-			elements.filesEdited.textContent = context.files.recentlyEdited.length;
-			elements.totalEdits.textContent = context.session.totalEdits;
-			elements.currentBranch.textContent = context.git.currentBranch;
-			elements.uncommittedChanges.textContent = 
-				`${context.git.uncommittedChanges.length} files`;
+		function updateContext(ctx){
+			el.activeFile.textContent = (ctx && ctx.files && ctx.files.activeFile) ? ctx.files.activeFile.split('/').pop() : '-';
+			el.currentBranch.textContent = (ctx && ctx.git && ctx.git.currentBranch) ? ctx.git.currentBranch : '-';
+			el.lastLine.textContent = (ctx && ctx.cursor && typeof ctx.cursor.line === 'number') ? String(ctx.cursor.line) : '-';
+			el.totalEdits.textContent = String((ctx && ctx.session && ctx.session.totalEdits) ? ctx.session.totalEdits : 0);
+			el.filesEdited.textContent = String((ctx && ctx.files && ctx.files.recentlyEdited) ? ctx.files.recentlyEdited.length : 0);
+			el.uncommittedChanges.textContent = String((ctx && ctx.git && ctx.git.uncommittedChanges) ? ctx.git.uncommittedChanges.length : 0);
 		}
 
-		function updateAnalysis(analysis) {
-			elements.issuesCount.textContent = analysis.issues.length;
-			
-			// Update risk badge
-			elements.riskBadge.textContent = analysis.riskLevel.toUpperCase();
-			elements.riskBadge.className = 'badge ' + analysis.riskLevel;
-			
-			elements.confidence.textContent = `${Math.round(analysis.confidence * 100)}%`;
+		function updateAnalysis(analysis){
+			el.issuesCount.textContent = (analysis && analysis.issues) ? String(analysis.issues.length) : '0';
+			const summary = (analysis && analysis.summary) ? analysis.summary
+				: (analysis && analysis.suggestions && analysis.suggestions.length>0) ? analysis.suggestions.slice(0,2).map(s=>s.message).join(' ') : (analysis && analysis.issues && analysis.issues.length>0) ? `Found ${analysis.issues.length} issues; top: ${analysis.issues[0].message}` : 'Analysis complete.';
+			el.analysisSummary.textContent = summary;
 
-			// Render issues
-			if (analysis.issues.length === 0) {
-				elements.issuesContainer.innerHTML = `
-					<div class="empty-state">
-						<div class="empty-state-icon">✅</div>
-						<div>No issues found! Your code looks great.</div>
-					</div>
-				`;
+			// Determine numeric risk 0-10
+			let riskVal = 0;
+			if (analysis && typeof analysis.risk === 'number') {
+				riskVal = Math.max(0, Math.min(10, Math.round(analysis.risk)));
+			} else if (analysis && typeof analysis.riskLevel === 'number') {
+				riskVal = Math.max(0, Math.min(10, Math.round(analysis.riskLevel)));
+			} else if (analysis && typeof analysis.riskLevel === 'string') {
+				const s = analysis.riskLevel.toLowerCase();
+				if (s === 'low') riskVal = 2; else if (s === 'medium') riskVal = 5; else if (s === 'high') riskVal = 8; else riskVal = 0;
+			}
+
+			const color = riskColor(riskVal);
+			const rn = document.getElementById('riskNumber');
+			const rf = document.getElementById('riskFill');
+			if (rn) rn.textContent = `${riskVal}/10`;
+			if (rn) rn.style.color = color;
+			if (rf) { rf.style.width = `${(riskVal/10)*100}%`; rf.style.background = color; }
+
+			if (analysis && analysis.issues && analysis.issues.length>0){
+				if (issuesContainerEl) issuesContainerEl.innerHTML = analysis.issues.slice(0,8).map(i=>`<div class=\"issue-item\">${i.severity.toUpperCase()}: ${i.message}</div>`).join('');
 			} else {
-				const issuesHtml = analysis.issues.slice(0, 5).map(issue => `
-					<div class="issue-item ${issue.severity}" onclick="navigateToIssue('${issue.file}', ${issue.line})">
-						<div class="issue-header">
-							<span class="badge ${issue.severity}">${issue.severity.toUpperCase()}</span>
-							<span class="issue-location">${getFileName(issue.file)}:${issue.line}</span>
-						</div>
-						<div class="issue-message">${issue.message}</div>
-					</div>
-				`).join('');
-
-				const moreCount = analysis.issues.length - 5;
-				const moreHtml = moreCount > 0 
-					? `<div style="text-align: center; margin-top: 12px; color: var(--vscode-descriptionForeground);">
-						+ ${moreCount} more issues (see tree view)
-					</div>`
-					: '';
-
-				elements.issuesContainer.innerHTML = `
-					<div class="issue-list">
-						${issuesHtml}
-						${moreHtml}
-					</div>
-				`;
+				if (issuesContainerEl) issuesContainerEl.innerHTML = '<div class="small-muted">No issues found.</div>';
 			}
 		}
 
-		function navigateToIssue(file, line) {
-			vscode.postMessage({ type: 'navigateToIssue', file, line });
-		}
-
-		function showLoading(message) {
-			elements.analyzeBtn.disabled = true;
-			elements.analyzeBtn.innerHTML = `<span class="spinner"></span>${message}`;
-		}
-
-		function showError(message) {
-			elements.issuesContainer.innerHTML = `
-				<div class="empty-state" style="color: var(--vscode-errorForeground);">
-					<div class="empty-state-icon">⚠️</div>
-					<div>${message}</div>
-				</div>
-			`;
-			elements.analyzeBtn.disabled = false;
-			elements.analyzeBtn.innerHTML = '🔍 Analyze Now';
-		}
-
-		function updateState(state) {
-			if (state.status === 'analyzing') {
-				showLoading(state.message || 'Analyzing');
-			} else {
-				elements.analyzeBtn.disabled = false;
-				elements.analyzeBtn.innerHTML = '🔍 Analyze Now';
+		function updateExtensionChanges(changes){
+			const countEl = document.getElementById('extensionChangesCount');
+			const cont = document.getElementById('extensionChangesContainer');
+			if (!cont) return;
+			if (!changes || !Array.isArray(changes) || changes.length === 0){
+				if (countEl) countEl.textContent = '0';
+				cont.innerHTML = '<div class="small-muted">No recorded changes.</div>';
+				return;
 			}
+			if (countEl) countEl.textContent = String(changes.length);
+			cont.innerHTML = changes.slice(0,50).map(c => {
+				const time = c.time ? (new Date(c.time)).toLocaleString() : '';
+				const what = c.description || c.message || c.action || JSON.stringify(c);
+				const who = c.actor ? `<span style="color:var(--vscode-descriptionForeground); font-size:11px; margin-right:6px">${c.actor}</span>` : '';
+				return `<div class=\"issue-item\">${who}<strong>${what}</strong><div class=\"small-muted\">${time}</div></div>`;
+			}).join('');
 		}
 
-		function getFileName(path) {
-			return path.split('/').pop() || path;
-		}
-
-		// Request initial context on load
+		// Request initial context and ensure sound is enabled by default via extension
 		vscode.postMessage({ type: 'requestContext' });
+		// Ask extension to ensure sound-on-open; extension will respond with 'elevenVoiceState'
+		vscode.postMessage({ type: 'ensureSoundOn' });
+
+		// Initialize UI (if extension has not yet responded, fall back to true)
+		try { const stored = localStorage.getItem(SOUND_KEY); setSoundUI(stored === null ? true : stored === 'true'); } catch (e) { setSoundUI(true); }
 	</script>
 </body>
 </html>
