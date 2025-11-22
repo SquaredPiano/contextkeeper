@@ -1,17 +1,23 @@
+import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
 import { GeminiModule } from './index';
 import { PromptTemplates } from './prompts';
 import { GeminiContext, Analysis, CodeFix, BatchAnalysisResult } from './types';
+import { parseJsonFromText } from './utils';
 
 export class GeminiClient implements GeminiModule {
   private apiKey: string = "";
-  private model: string = "gemini-2.5-flash";
+  private modelName: string = "gemini-2.5-flash";
+  private genAI: GoogleGenerativeAI | null = null;
+  private model: GenerativeModel | null = null;
   private ready = false;
   private lastRequestTime = 0;
   private minRequestInterval = 2000; // 2 seconds between requests to be safe
 
-  async initialize(apiKey: string, model: string = "gemini-2.5-flash"): Promise<void> {
+  async initialize(apiKey: string, modelName: string = "gemini-2.5-flash"): Promise<void> {
     this.apiKey = apiKey;
-    this.model = model;
+    this.modelName = modelName;
+    this.genAI = new GoogleGenerativeAI(this.apiKey);
+    this.model = this.genAI.getGenerativeModel({ model: this.modelName });
     this.ready = true;
   }
 
@@ -20,7 +26,8 @@ export class GeminiClient implements GeminiModule {
   }
 
   enableMockMode(): void {
-    this.model = "mock";
+    this.modelName = "mock";
+    this.model = null; // Ensure we don't use the real model
   }
 
   private async rateLimit() {
@@ -33,20 +40,24 @@ export class GeminiClient implements GeminiModule {
     this.lastRequestTime = Date.now();
   }
 
-  private parseJsonFromText<T>(text: string, fallback: T): T {
+  async getEmbedding(text: string): Promise<number[]> {
+    if (!this.ready || !this.genAI) {
+      throw new Error("GeminiClient not initialized");
+    }
+    
+    await this.rateLimit();
+
+    if (this.modelName === "mock") {
+      return new Array(768).fill(0.1);
+    }
+
     try {
-      const firstBrace = text.indexOf('{');
-      const lastBrace = text.lastIndexOf('}');
-      
-      if (firstBrace === -1 || lastBrace === -1) {
-        throw new Error("No JSON object found in response");
-      }
-      
-      const jsonStr = text.substring(firstBrace, lastBrace + 1);
-      return JSON.parse(jsonStr) as T;
-    } catch (e) {
-      console.warn("Failed to parse Gemini JSON response:", e);
-      return fallback;
+      const embeddingModel = this.genAI.getGenerativeModel({ model: 'text-embedding-004' });
+      const result = await embeddingModel.embedContent(text);
+      return result.embedding.values;
+    } catch (error) {
+      console.error("Gemini embedding generation failed:", error);
+      throw error;
     }
   }
 
@@ -55,7 +66,7 @@ export class GeminiClient implements GeminiModule {
     
     await this.rateLimit();
 
-    if (this.model === "mock") {
+    if (this.modelName === "mock") {
       return {
         globalSummary: "Mock batch analysis",
         files: Array.from(files.keys()).map(f => ({
@@ -70,32 +81,19 @@ export class GeminiClient implements GeminiModule {
     const prompt = PromptTemplates.batchProcess(files, context);
 
     try {
-      const response = await this.fetchWithRetry(
-        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as any;
-      return this.parseBatchResponse(data);
+      if (!this.model) { throw new Error("Model not initialized"); }
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+      return this.parseBatchResponse(text);
     } catch (error) {
       console.error("Gemini batch analysis failed:", error);
       throw error;
     }
   }
 
-  private parseBatchResponse(data: any): BatchAnalysisResult {
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return this.parseJsonFromText<BatchAnalysisResult>(text, {
+  private parseBatchResponse(text: string): BatchAnalysisResult {
+    return parseJsonFromText<BatchAnalysisResult>(text, {
       globalSummary: "Failed to parse AI response",
       files: []
     });
@@ -108,7 +106,7 @@ export class GeminiClient implements GeminiModule {
     
     await this.rateLimit();
 
-    if (this.model === "mock") {
+    if (this.modelName === "mock") {
       return {
         issues: [
           { line: 1, severity: "warning", message: "Mock issue: Variable might be undefined" }
@@ -122,56 +120,18 @@ export class GeminiClient implements GeminiModule {
     const prompt = PromptTemplates.codeAnalysis(code, context);
 
     try {
-      const response = await this.fetchWithRetry(
-        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as any;
-      return this.parseAnalysis(data);
+      if (!this.model) { throw new Error("Model not initialized"); }
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+      return this.parseAnalysis(text);
     } catch (error) {
       console.error("Gemini analysis failed:", error);
       throw error;
     }
   }
 
-  private async fetchWithRetry(url: string, options: RequestInit, retries = 3): Promise<Response> {
-    for (let i = 0; i < retries; i++) {
-      try {
-        const response = await fetch(url, options);
-        if (response.ok) {return response;}
-        
-        console.warn(`Gemini API attempt ${i + 1} failed: ${response.status} ${response.statusText}`);
-        
-        // If 429 (Too Many Requests) or 5xx, retry
-        if (response.status === 429 || response.status >= 500) {
-          const delay = Math.pow(2, i) * 1000; // Exponential backoff
-          await new Promise(resolve => setTimeout(resolve, delay));
-          continue;
-        }
-        return response;
-      } catch (error) {
-        console.warn(`Gemini API network error attempt ${i + 1}:`, error);
-        if (i === retries - 1) {throw error;}
-        const delay = Math.pow(2, i) * 1000;
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
-    }
-    throw new Error("Max retries exceeded");
-  }
-
-  private parseAnalysis(data: any): Analysis {
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  private parseAnalysis(text: string): Analysis {
     const fallback: Analysis = {
       issues: [],
       suggestions: ["Failed to parse AI response. Please try again."],
@@ -179,7 +139,7 @@ export class GeminiClient implements GeminiModule {
       summary: "Error parsing AI response."
     };
 
-    const parsed = this.parseJsonFromText<any>(text, fallback);
+    const parsed = parseJsonFromText<any>(text, fallback);
     
     // Ensure structure even if parsed correctly but missing fields
     return {
@@ -196,7 +156,7 @@ export class GeminiClient implements GeminiModule {
 
     await this.rateLimit();
 
-    if (this.model === "mock") {
+    if (this.modelName === "mock") {
       return `
 describe('generatedTest', () => {
   it('should work', () => {
@@ -208,24 +168,10 @@ describe('generatedTest', () => {
     const prompt = PromptTemplates.testGeneration(functionCode);
     
     try {
-      const response = await this.fetchWithRetry(
-        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as any;
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      return text;
+      if (!this.model) { throw new Error("Model not initialized"); }
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      return response.text();
     } catch (error) {
       console.error("Gemini test generation failed:", error);
       throw error;
@@ -237,7 +183,7 @@ describe('generatedTest', () => {
 
     await this.rateLimit();
 
-    if (this.model === "mock") {
+    if (this.modelName === "mock") {
       return {
         fixedCode: code + "\n// Fixed by mock",
         confidence: 0.9,
@@ -248,23 +194,10 @@ describe('generatedTest', () => {
     const prompt = PromptTemplates.errorFix(code, error);
     
     try {
-      const response = await this.fetchWithRetry(
-        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }]
-          })
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.statusText}`);
-      }
-
-      const data = await response.json() as any;
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (!this.model) { throw new Error("Model not initialized"); }
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
       
       const fallback: CodeFix = {
         fixedCode: code,
@@ -272,7 +205,7 @@ describe('generatedTest', () => {
         explanation: "Failed to parse fix response"
       };
 
-      return this.parseJsonFromText<CodeFix>(text, fallback);
+      return parseJsonFromText<CodeFix>(text, fallback);
     } catch (error) {
       console.error("Gemini error fix failed:", error);
       throw error;

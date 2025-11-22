@@ -1,6 +1,6 @@
 import { EventEmitter } from "events";
 import * as vscode from "vscode";
-import { getLogsWithGitlog } from "../../modules/gitlogs/gitlog";
+import { GitService } from "./GitService";
 import {
   IContextService,
   DeveloperContext,
@@ -8,7 +8,10 @@ import {
   FileEdit,
   EditEvent,
   FileEvent,
+  IGitService,
+  IStorageService
 } from "../../services/interfaces";
+import { LanceDBStorage } from "../../services/storage/storage";
 
 export class ContextService extends EventEmitter implements IContextService {
   // State tracking
@@ -16,13 +19,21 @@ export class ContextService extends EventEmitter implements IContextService {
   private editTimeline: EditEvent[] = [];
   private fileOpens: FileEvent[] = [];
   private fileCloses: FileEvent[] = [];
-  private activeFunction: string = "";
-  private gitContextCache: { commits: GitCommit[]; branch: string } | null =
-    null;
+  private gitContextCache: { commits: GitCommit[]; branch: string } | null = null;
+  
+  private gitService: IGitService;
+  private storageService: IStorageService;
 
-  constructor() {
+  constructor(gitService?: IGitService, storageService?: IStorageService) {
     super();
+    
+    // Initialize services with defaults if not provided
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || "";
+    this.gitService = gitService || new GitService(workspaceRoot);
+    this.storageService = storageService || new LanceDBStorage();
+
     this.setupFileWatchers();
+    
     // Refresh git context periodically (every 5 mins)
     setInterval(() => this.refreshGitContext(), 5 * 60 * 1000);
     this.refreshGitContext(); // Initial fetch
@@ -31,22 +42,17 @@ export class ContextService extends EventEmitter implements IContextService {
   // --- 1. GIT LOGS & CONTEXT ---
   private async refreshGitContext() {
     try {
-      const logs = await getLogsWithGitlog(vscode.workspace.rootPath);
-      // Map the gitlog output to our interface
-      const commits: GitCommit[] = logs.map((log: any) => ({
-        hash: log.hash,
-        message: log.subject,
-        author: log.authorName,
-        date: new Date(log.authorDate),
-      }));
-
-      // Simple branch detection
-      const branch = "main"; // Ideally use simple-git here for real branch name
+      const commits = await this.gitService.getRecentCommits(10);
+      const branch = await this.gitService.getCurrentBranch();
 
       this.gitContextCache = { commits, branch };
       
       // Emit event for linting service to trigger linting on git refresh
       this.emit("gitContextRefreshed", { commits, branch });
+      
+      // Log to storage
+      // We might want to log the latest commit if it's new, but GitWatcher handles that better.
+      // Here we just update cache.
     } catch (e) {
       console.warn("Failed to fetch git logs:", e);
     }
@@ -56,11 +62,16 @@ export class ContextService extends EventEmitter implements IContextService {
   async collectContext(): Promise<DeveloperContext> {
     const editor = vscode.window.activeTextEditor;
 
+    // Ensure we have fresh git context
+    if (!this.gitContextCache) {
+      await this.refreshGitContext();
+    }
+
     const context: DeveloperContext = {
       git: {
         recentCommits: this.gitContextCache?.commits || [],
         currentBranch: this.gitContextCache?.branch || "unknown",
-        uncommittedChanges: [], // Can expand with simple-git status
+        uncommittedChanges: [], // TODO: Implement uncommitted changes in GitService
       },
       files: {
         openFiles: vscode.workspace.textDocuments.map((d) => d.fileName),
@@ -84,7 +95,29 @@ export class ContextService extends EventEmitter implements IContextService {
     // Emit event for linting service and other listeners
     this.emit("contextCollected", context);
     
+    // Persist session context to Vector DB
+    this.persistContext(context);
+
     return context;
+  }
+
+  private async persistContext(context: DeveloperContext) {
+    try {
+      // Log a snapshot of the context
+      await this.storageService.logEvent({
+        timestamp: Date.now(),
+        event_type: 'context_collected',
+        file_path: 'workspace',
+        metadata: JSON.stringify({
+          commitCount: context.git.recentCommits.length,
+          openFiles: context.files.openFiles.length,
+          activeFile: context.files.activeFile,
+          riskyFilesCount: context.session.riskyFiles.length
+        })
+      });
+    } catch (error) {
+      console.error("Failed to persist context:", error);
+    }
   }
 
   // --- 5. FUNCTION/COMPONENT CLOSED DETECTION ---

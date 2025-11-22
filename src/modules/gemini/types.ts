@@ -10,6 +10,7 @@ export interface GeminiContext {
   dependencies?: string[];
   openFileContents?: Map<string, string>; // file path -> content
   userIntent?: string; // inferred or explicit
+  relevantPastSessions?: Array<{ summary: string; timestamp: number }>;
 }
 
 export interface AnalysisIssue {

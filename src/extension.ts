@@ -13,9 +13,10 @@ import { LintingService } from "./modules/gitlogs/LintingService";
 import { ContextIngestionService } from "./services/ingestion/ContextIngestionService";
 import { storage } from "./services/storage";
 
-// Import mock services (INTEGRATION POINT: Replace with real services here)
-import { MockContextService } from "./services/mock/MockContextService";
+// Import real services
+import { ContextService } from "./services/real/ContextService";
 import { GeminiService } from "./services/real/GeminiService"; // Real AI Service
+import { ElevenLabsService } from "./modules/elevenlabs/elevenlabs"; // Real Voice Service
 import { MockGitService } from "./services/mock/MockGitService";
 import { MockVoiceService } from "./services/mock/MockVoiceService";
 
@@ -32,18 +33,22 @@ import {
   ExtensionState,
   UIToExtensionMessage,
   IAIService,
+  IVoiceService,
 } from "./services/interfaces";
+
+import { CommandManager } from "./managers/CommandManager";
 
 // Global state
 let statusBar: StatusBarManager;
 let sidebarProvider: SidebarWebviewProvider;
 let issuesTreeProvider: IssuesTreeProvider;
+let commandManager: CommandManager;
 
 // Services (INTEGRATION POINT: Swap mock with real services)
-let contextService: MockContextService;
+let contextService: ContextService;
 let aiService: IAIService;
 let gitService: MockGitService;
-let voiceService: MockVoiceService;
+let voiceService: IVoiceService;
 let lintingService: LintingService;
 let ingestionService: ContextIngestionService;
 
@@ -58,10 +63,8 @@ export function activate(context: vscode.ExtensionContext) {
   console.log('Autonomous Copilot extension is now active!');
   
   try {
-    let fileWatcher: FileWatcher | null = null;
-
     // Initialize services
-    contextService = new MockContextService();
+    contextService = new ContextService();
     
     // Initialize Linting Service
     lintingService = new LintingService();
@@ -97,7 +100,23 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     gitService = new MockGitService();
-    voiceService = new MockVoiceService();
+    
+    // Initialize Voice Service (Real or Mock)
+    const elevenLabsApiKey = ckConfig.get<string>('elevenlabs.apiKey') || process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY || "";
+    const voiceEnabled = ckConfig.get<boolean>('voice.enabled', true);
+
+    if (voiceEnabled && elevenLabsApiKey) {
+      const realVoiceService = new ElevenLabsService();
+      realVoiceService.initialize(elevenLabsApiKey).then(() => {
+        console.log("ElevenLabs Service initialized");
+      }).catch(err => {
+        console.error("Failed to initialize ElevenLabs:", err);
+      });
+      voiceService = realVoiceService;
+    } else {
+      console.log("Using Mock Voice Service (Voice disabled or no API key)");
+      voiceService = new MockVoiceService();
+    }
 
     // Initialize UI components
     statusBar = new StatusBarManager();
@@ -120,8 +139,16 @@ export function activate(context: vscode.ExtensionContext) {
     // Set up service event listeners
     setupServiceListeners();
 
-    // Register commands
-    registerCommands(context);
+    // Initialize Command Manager
+    commandManager = new CommandManager(
+      context,
+      contextService,
+      aiService,
+      sidebarProvider,
+      statusBar,
+      issuesTreeProvider
+    );
+    commandManager.registerCommands();
 
     // Add to subscriptions
     context.subscriptions.push(
@@ -137,122 +164,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Show welcome notification
     NotificationManager.showSuccess(
-      '🤖 Autonomous Copilot is ready!',
+      'Autonomous Copilot is ready!',
       'Open Dashboard'
     ).then(action => {
       if (action === 'Open Dashboard') {
         vscode.commands.executeCommand('copilot.showPanel');
       }
     });
-
-    // Legacy commands for backwards compatibility
-    const disposable = vscode.commands.registerCommand(
-      "contextkeeper.helloWorld",
-      () => {
-        vscode.window.showInformationMessage("Hello World from contextkeeper!");
-      }
-    );
-
-    const testGitlog = vscode.commands.registerCommand(
-      "contextkeeper.testGitlog",
-      async () => {
-        try {
-          vscode.window.showInformationMessage("Fetching git logs...");
-
-          const logs = await getLogsWithGitlog();
-
-          const outputChannel =
-            vscode.window.createOutputChannel("ContextKeeper");
-          outputChannel.clear();
-          outputChannel.appendLine("=== Recent Git Commits ===");
-          logs.forEach((commit: any, i: number) => {
-            outputChannel.appendLine(`\n${i + 1}. ${commit.subject}`);
-            outputChannel.appendLine(`   Author: ${commit.authorName}`);
-            outputChannel.appendLine(`   Hash: ${commit.hash}`);
-            outputChannel.appendLine(`   Date: ${commit.authorDate}`);
-          });
-          outputChannel.show();
-
-          vscode.window.showInformationMessage(
-            `✅ Found ${logs.length} commits!`
-          );
-        } catch (err: any) {
-          vscode.window.showErrorMessage(`❌ Error: ${err.message}`);
-          console.error("Gitlog error:", err);
-        }
-      }
-    );
-
-    const showStoredEvents = vscode.commands.registerCommand(
-      "contextkeeper.showStoredEvents",
-      async () => {
-        try {
-          const events = await storage.getRecentEvents(20);
-          const channel = vscode.window.createOutputChannel("ContextKeeper Storage");
-          channel.clear();
-          channel.appendLine("=== Recent Stored Events (LanceDB) ===");
-          
-          if (events.length === 0) {
-            channel.appendLine("No events found.");
-          }
-
-          events.forEach((event, i) => {
-            channel.appendLine(`\n[${i + 1}] ${new Date(event.timestamp).toLocaleString()} - ${event.event_type}`);
-            channel.appendLine(`    File: ${event.file_path}`);
-            channel.appendLine(`    Metadata: ${event.metadata}`);
-          });
-          
-          channel.show();
-        } catch (error: any) {
-          vscode.window.showErrorMessage(`Failed to fetch events: ${error.message}`);
-        }
-      }
-    );
-
-    const startWatcher = vscode.commands.registerCommand(
-      "contextkeeper.startAutoLint",
-      () => {
-        if (fileWatcher) {
-          vscode.window.showWarningMessage("Auto-lint is already running!");
-          return;
-        }
-
-        // Get the linting endpoint from settings (or use default)
-        const config = vscode.workspace.getConfiguration("contextkeeper");
-        const endpoint =
-          config.get<string>("lintingEndpoint") ||
-          "https://contextkeeper-worker.workers.dev/lint";
-
-        fileWatcher = new FileWatcher(endpoint);
-        fileWatcher.start();
-
-        vscode.window.showInformationMessage(
-          "🔍 Auto-lint enabled! Files will be checked on save."
-        );
-      }
-    );
-
-    // Command to stop auto-linting
-    const stopWatcher = vscode.commands.registerCommand(
-      "contextkeeper.stopAutoLint",
-      () => {
-        if (!fileWatcher) {
-          vscode.window.showWarningMessage("Auto-lint is not running!");
-          return;
-        }
-
-        fileWatcher.stop();
-        fileWatcher = null;
-
-        vscode.window.showInformationMessage("⏸️ Auto-lint disabled.");
-      }
-    );
-
-    context.subscriptions.push(startWatcher);
-    context.subscriptions.push(stopWatcher);
-    context.subscriptions.push(testGitlog);
-    context.subscriptions.push(showStoredEvents);
-    context.subscriptions.push(disposable);
 
   } catch (error: any) {
     console.error("Extension activation failed:", error);
@@ -348,7 +266,7 @@ function registerCommands(context: vscode.ExtensionContext) {
       if (isAutonomousMode) {
         NotificationManager.showAutonomousStarted();
       } else {
-        NotificationManager.showSuccess('🤖 Autonomous mode disabled');
+        NotificationManager.showSuccess('Autonomous mode disabled');
       }
     })
   );

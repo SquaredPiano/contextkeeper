@@ -14,6 +14,10 @@ export class PromptTemplates {
       ? context.recentErrors.join("\n- ")
       : "None";
 
+    const pastSessionsStr = context.relevantPastSessions && context.relevantPastSessions.length > 0
+      ? context.relevantPastSessions.map(s => `- ${new Date(s.timestamp).toLocaleDateString()}: ${s.summary}`).join("\n")
+      : "None";
+
     return `
 You are an expert AI coding assistant. Your task is to analyze the provided code within the context of the user's current workflow.
 
@@ -25,6 +29,8 @@ CONTEXT:
 - Recent Workspace Errors:
 - ${errorsStr}
 - Edit Frequency: ${context.editCount} edits in session
+- Relevant Past Sessions (from Vector DB):
+${pastSessionsStr}
 
 GIT DIFF SUMMARY (Recent changes):
 ${context.gitDiffSummary}

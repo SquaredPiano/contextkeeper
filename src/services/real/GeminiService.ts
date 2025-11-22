@@ -2,21 +2,29 @@ import { IAIService, DeveloperContext, AIAnalysis, CodeFix } from '../interfaces
 import { GeminiClient } from '../../modules/gemini/gemini-client';
 import { ContextBuilder } from '../../modules/gemini/context-builder';
 import { BatchAnalysisResult } from '../../modules/gemini/types';
+import { LanceDBStorage } from '../../services/storage/storage';
 import { EventEmitter } from 'events';
 import * as vscode from 'vscode';
 
 export class GeminiService extends EventEmitter implements IAIService {
   private client: GeminiClient;
+  private storage: LanceDBStorage;
   private isInitialized: boolean = false;
   private batchCache: Map<string, BatchAnalysisResult> = new Map();
 
   constructor() {
     super();
     this.client = new GeminiClient();
+    this.storage = new LanceDBStorage();
   }
 
   async initialize(apiKey: string): Promise<void> {
     await this.client.initialize(apiKey);
+    try {
+      await this.storage.connect(this.client);
+    } catch (e) {
+      console.warn("Failed to connect to LanceDB:", e);
+    }
     this.isInitialized = true;
   }
 
@@ -34,7 +42,7 @@ export class GeminiService extends EventEmitter implements IAIService {
     this.emit('analysisStarted');
 
     try {
-      const geminiContext = ContextBuilder.build({
+      const geminiContext = await ContextBuilder.build({
         gitLogs: context.git.recentCommits.map(c => `${c.hash.substring(0,7)} - ${c.message}`),
         gitDiff: "", 
         openFiles: context.files.openFiles,
@@ -44,7 +52,7 @@ export class GeminiService extends EventEmitter implements IAIService {
           file: e.file, 
           timestamp: e.timestamp.getTime() 
         }))
-      });
+      }, this.storage);
 
       // Prepare batch payload
       const filesToAnalyze = new Map<string, string>();

@@ -172,6 +172,28 @@ export interface IVoiceService {
 	isEnabled(): boolean;
 }
 
+/**
+ * Embedding Service - Generates vector embeddings for text
+ * 
+ * MOCK: Returns random vectors
+ * REAL: Calls Gemini API (text-embedding-004)
+ */
+export interface IEmbeddingService {
+	getEmbedding(text: string): Promise<number[]>;
+}
+
+export interface StorageEvent {
+    timestamp: number;
+    event_type: string;
+    file_path: string;
+    metadata: string;
+}
+
+export interface IStorageService {
+  getSimilarSessions(query: string, topK?: number): Promise<Array<{ summary: string; timestamp: number }>>;
+  logEvent(event: StorageEvent): Promise<void>;
+}
+
 // ============================================================================
 // SERVICE EVENTS
 // ============================================================================

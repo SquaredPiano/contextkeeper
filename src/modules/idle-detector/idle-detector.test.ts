@@ -7,6 +7,7 @@ vi.mock('vscode', () => ({
   window: {
     onDidChangeWindowState: vi.fn(() => ({ dispose: vi.fn() })),
     onDidChangeTextEditorSelection: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
   },
   workspace: {
     onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
@@ -18,7 +19,7 @@ describe('IdleDetector', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    detector = new IdleDetector(1000); // 1 second threshold
+    detector = new IdleDetector({ thresholdMs: 1000 }); // 1 second threshold
   });
 
   afterEach(() => {

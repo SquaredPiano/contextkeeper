@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import { getLogsWithGitlog } from '../../modules/gitlogs/gitlog';
+import { GitService } from '../../modules/gitlogs/GitService';
 
 export interface GitCommitEvent {
   hash: string;
@@ -14,9 +14,11 @@ export class GitWatcher extends EventEmitter {
   private lastCommitHash: string | null = null;
   private pollInterval: NodeJS.Timeout | null = null;
   private isPolling: boolean = false;
+  private gitService: GitService;
 
   constructor(private workspaceRoot: string, private intervalMs: number = 30000) {
     super();
+    this.gitService = new GitService(workspaceRoot);
   }
 
   public start(): void {
@@ -46,7 +48,7 @@ export class GitWatcher extends EventEmitter {
     this.isPolling = true;
 
     try {
-      const logs = await getLogsWithGitlog(this.workspaceRoot);
+      const logs = await this.gitService.getRecentCommits(10);
       
       if (!logs || logs.length === 0) {
         this.isPolling = false;
@@ -67,9 +69,9 @@ export class GitWatcher extends EventEmitter {
         
         newCommits.push({
           hash: log.hash,
-          message: log.subject,
-          author: log.authorName,
-          date: log.authorDate,
+          message: log.message,
+          author: log.author,
+          date: log.date.toISOString(),
           files: log.files || []
         });
       }

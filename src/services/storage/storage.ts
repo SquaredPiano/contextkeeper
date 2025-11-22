@@ -2,14 +2,21 @@ import * as lancedb from '@lancedb/lancedb';
 import { v4 as uuidv4 } from 'uuid';
 import { EventRecord, SessionRecord, ActionRecord } from './schema';
 import { generateEmbedding } from './embeddings';
+import { IEmbeddingService, IStorageService } from '../interfaces';
 
-export class LanceDBStorage {
+export class LanceDBStorage implements IStorageService {
   private db: lancedb.Connection | null = null;
   private eventsTable: lancedb.Table | null = null;
   private sessionsTable: lancedb.Table | null = null;
   private actionsTable: lancedb.Table | null = null;
+  private embeddingService: IEmbeddingService | null = null;
 
-  async connect(): Promise<void> {
+  async connect(embeddingService?: IEmbeddingService): Promise<void> {
+    if (embeddingService) {
+      this.embeddingService = embeddingService;
+    }
+    if (this.db) { return; } // Already connected
+
     const uri = `db://${process.env.LANCEDB_DB_NAME}`;
     this.db = await lancedb.connect(uri, {
       apiKey: process.env.LANCE_DB_API_KEY,
@@ -71,6 +78,13 @@ export class LanceDBStorage {
     }
   }
 
+  private async getEmbedding(text: string): Promise<number[]> {
+    if (this.embeddingService) {
+      return this.embeddingService.getEmbedding(text);
+    }
+    return generateEmbedding(text);
+  }
+
   async logEvent(event: Omit<EventRecord, 'id'>): Promise<void> {
     if (!this.eventsTable) { throw new Error('Events table not initialized'); }
     
@@ -86,7 +100,7 @@ export class LanceDBStorage {
   async createSession(summary: string, project: string): Promise<SessionRecord> {
     if (!this.sessionsTable) { throw new Error('Sessions table not initialized'); }
 
-    const embedding = await generateEmbedding(summary);
+    const embedding = await this.getEmbedding(summary);
     
     const session: SessionRecord = {
       id: uuidv4(),
@@ -104,7 +118,7 @@ export class LanceDBStorage {
   async addAction(action: Omit<ActionRecord, 'id' | 'embedding'>): Promise<void> {
     if (!this.actionsTable) { throw new Error('Actions table not initialized'); }
 
-    const embedding = await generateEmbedding(action.description);
+    const embedding = await this.getEmbedding(action.description);
     
     const record: ActionRecord = {
       id: uuidv4(),
@@ -139,7 +153,7 @@ export class LanceDBStorage {
   async getSimilarSessions(queryText: string, topK: number = 5): Promise<SessionRecord[]> {
     if (!this.sessionsTable) { throw new Error('Sessions table not initialized'); }
 
-    const embedding = await generateEmbedding(queryText);
+    const embedding = await this.getEmbedding(queryText);
     
     const results = await this.sessionsTable
       .vectorSearch(embedding)
@@ -150,7 +164,18 @@ export class LanceDBStorage {
   }
 
   async getRecentEvents(limit: number = 50): Promise<EventRecord[]> {
-    if (!this.eventsTable) { throw new Error('Events table not initialized'); }
+    if (!this.eventsTable) { 
+      // Auto-initialize if not ready (lazy loading)
+      if (this.db) {
+        await this.initializeTables();
+      } else {
+        await this.connect();
+      }
+      
+      if (!this.eventsTable) {
+        throw new Error('Events table could not be initialized'); 
+      }
+    }
 
     // Fetch more than limit to ensure we get the absolute latest if they are not strictly ordered on disk
     // But usually they are.

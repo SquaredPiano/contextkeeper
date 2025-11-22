@@ -8,6 +8,7 @@ export interface ElevenLabsModule {
 
 export { ElevenLabsService } from './elevenlabs';
 export { MockPlayer } from './mock';
+export { AudioPlayer } from './audio-player';
 export { voiceMap } from './voices';
 
 /**

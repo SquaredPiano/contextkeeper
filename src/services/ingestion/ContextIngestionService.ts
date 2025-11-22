@@ -47,9 +47,13 @@ export class ContextIngestionService {
   }
 
   private setupListeners(): void {
-    // File Open
+    // File Open (Active Editor Change)
     this.disposables.push(
-      vscode.workspace.onDidOpenTextDocument(doc => this.handleFileOpen(doc))
+      vscode.window.onDidChangeActiveTextEditor(editor => {
+        if (editor) {
+          this.handleFileOpen(editor.document);
+        }
+      })
     );
 
     // File Close
@@ -166,7 +170,16 @@ export class ContextIngestionService {
   }
 
   private shouldIgnoreFile(uri: vscode.Uri): boolean {
-    return uri.scheme !== 'file' || uri.fsPath.includes('.git') || uri.fsPath.includes('node_modules');
+    const fsPath = uri.fsPath;
+    return (
+      uri.scheme !== 'file' ||
+      fsPath.includes('.git') ||
+      fsPath.includes('node_modules') ||
+      fsPath.includes('.next') ||
+      fsPath.includes('dist') ||
+      fsPath.includes('out') ||
+      fsPath.includes('build')
+    );
   }
 
   private logToOutput(message: string): void {
