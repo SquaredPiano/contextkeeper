@@ -128,9 +128,9 @@
 			</div>
 
 			<div class="actions" style="align-items:center;">
-				<button id="analyzeBtn" class="action-item primary">Analyze</button>
 				<button id="refreshContextBtn" class="action-item">Refresh</button>
 				<button id="toggleSoundBtn" class="action-item">Sound: <span id="soundStatus" class="sound-on">ON</span></button>
+				<button id="toggleNotifBtn" class="action-item">Notifs: <span id="notifStatus" class="sound-on">ON</span></button>
 				<div class="action-item autonomy" style="padding:4px 8px; gap:6px; justify-content:center;">
 					<span class="secs-label">Every</span>
 					<input id="autonomyDelayInput" type="number" min="0" step="1" aria-label="Autonomy delay in seconds" title="Seconds until autonomy starts" />
@@ -157,25 +157,32 @@
 			<!-- Issues list: re-introduced so analysis can render below 'Issues Found' -->
 			<div id="issuesContainer" class="issue-list"><div class="small-muted">No issues found.</div></div>
 		</div>
-
+		
 		<!-- issues container removed -->
+	</div>
+
+	<!-- Extension Changes: list of changes performed by the extension while the webview was closed/away -->
+	<div class="section" id="extensionChangesSection">
+		<div class="title">Recent Changes</div>
+		<div class="info-row" style="border-bottom:0; padding:0;">
+			<!-- subtitle removed per request -->
+			<div style="display:flex; gap:12px; align-items:center; margin-top:6px;">
+				<div class="small-muted">Changes</div>
+				<div id="extensionChangesCount">0</div>
+			</div>
+			<div id="extensionChangesContainer" class="issue-list"><div class="small-muted">No recorded changes.</div></div>
+		</div>
 	</div>
 
 	<script>
 		const vscode = acquireVsCodeApi();
 
-		const ids = ['activeFile','currentBranch','lastLine','analysisSummary','totalEdits','filesEdited','uncommittedChanges','analyzeBtn','refreshContextBtn','toggleSoundBtn','soundStatus','issuesCount','riskNumber','riskFill'];
+		const ids = ['activeFile','currentBranch','lastLine','analysisSummary','totalEdits','filesEdited','uncommittedChanges','refreshContextBtn','toggleSoundBtn','notifStatus','soundStatus','issuesCount','riskNumber','riskFill'];
 		const el = {};
 		ids.forEach(id => el[id] = document.getElementById(id));
 		const issuesContainerEl = document.getElementById('issuesContainer');
 
 		// Buttons
-		el.analyzeBtn.addEventListener('click', () => {
-			vscode.postMessage({ type: 'triggerAnalysis' });
-			el.analyzeBtn.disabled = true;
-			el.analyzeBtn.textContent = 'Analyzing...';
-		});
-
 		el.refreshContextBtn.addEventListener('click', () => {
 			vscode.postMessage({ type: 'requestContext' });
 		});
@@ -187,6 +194,15 @@
 			el.soundStatus.className = enabled ? 'sound-on' : 'sound-off';
 		}
 
+		// Notifications toggle (controls whether extension shows pop-ups)
+		const NOTIF_KEY = 'copilotNotifsEnabled';
+		function setNotifUI(enabled){
+			const nEl = document.getElementById('notifStatus');
+			if (!nEl) return;
+			nEl.textContent = enabled ? 'ON' : 'OFF';
+			nEl.className = enabled ? 'sound-on' : 'sound-off';
+		}
+
 		// Autonomy delay input: initialize and wire to extension
 		const AUTONOMY_KEY = 'autonomyDelay';
 		const autonomyInput = document.getElementById('autonomyDelayInput');
@@ -196,14 +212,23 @@
 		function sendAutonomyDelay(seconds){
 			vscode.postMessage({ type: 'setAutonomyDelay', seconds });
 		}
-		// init value (default 5s)
+		// init value (default 15s)
+		let _autoTimer = null;
+		function scheduleAutoAnalysis(seconds){
+			if (_autoTimer) clearInterval(_autoTimer);
+			if (!Number.isFinite(seconds) || seconds <= 0) return;
+			_autoTimer = setInterval(()=>{ vscode.postMessage({ type: 'triggerAnalysis' }); }, seconds * 1000);
+		}
+
 		try{
 			const stored = localStorage.getItem(AUTONOMY_KEY);
-			const val = stored === null ? 5 : Number(stored);
-			setAutonomyUI(Number.isFinite(val) ? val : 5);
-			// notify extension of initial value
-			sendAutonomyDelay(Number.isFinite(val) ? val : 5);
-		} catch(e) { setAutonomyUI(5); sendAutonomyDelay(5); }
+			const val = stored === null ? 15 : Number(stored);
+			const initial = Number.isFinite(val) ? val : 15;
+			setAutonomyUI(initial);
+			// notify extension and schedule
+			sendAutonomyDelay(initial);
+			scheduleAutoAnalysis(initial);
+		} catch(e) { setAutonomyUI(15); sendAutonomyDelay(15); scheduleAutoAnalysis(15); }
 
 		autonomyInput.addEventListener('change', () => {
 			let v = Number(autonomyInput.value);
@@ -212,6 +237,7 @@
 			try { localStorage.setItem(AUTONOMY_KEY, String(v)); } catch (e) {}
 			setAutonomyUI(v);
 			sendAutonomyDelay(v);
+			scheduleAutoAnalysis(v);
 		});
 
 		document.getElementById('toggleSoundBtn').addEventListener('click', () => {
@@ -221,6 +247,15 @@
 			try { localStorage.setItem(SOUND_KEY, String(next)); } catch (e) {}
 			setSoundUI(next);
 			vscode.postMessage({ type: 'setElevenVoice', enabled: next });
+		});
+
+		document.getElementById('toggleNotifBtn').addEventListener('click', () => {
+			let current = null;
+			try { current = localStorage.getItem(NOTIF_KEY); } catch (e) {}
+			const next = current === null ? false : !(current === 'true');
+			try { localStorage.setItem(NOTIF_KEY, String(next)); } catch (e) {}
+			setNotifUI(next);
+			vscode.postMessage({ type: 'setNotifications', enabled: next });
 		});
 
 		// Color interpolation helper (green -> dark red)
@@ -244,12 +279,17 @@
 			switch (msg.type) {
 				case 'contextUpdate': updateContext(msg.payload); break;
 				case 'analysisComplete': updateAnalysis(msg.payload); break;
+				case 'extensionChanges': updateExtensionChanges(msg.payload); break;
+				case 'notificationsState':
+					try { localStorage.setItem(NOTIF_KEY, String(Boolean(msg.enabled))); } catch (e) {}
+					setNotifUI(Boolean(msg.enabled));
+					break;
 				case 'elevenVoiceState':
 					try { localStorage.setItem(SOUND_KEY, String(Boolean(msg.enabled))); } catch (e) {}
 					setSoundUI(Boolean(msg.enabled));
 					break;
 				case 'stateChanged':
-					if (msg.state && msg.state.status !== 'analyzing') { el.analyzeBtn.disabled = false; el.analyzeBtn.textContent = 'Analyze'; }
+					// no analyze button UI to update; extension state changes can be handled here if needed
 					break;
 			}
 		});
@@ -292,6 +332,24 @@
 			} else {
 				if (issuesContainerEl) issuesContainerEl.innerHTML = '<div class="small-muted">No issues found.</div>';
 			}
+		}
+
+		function updateExtensionChanges(changes){
+			const countEl = document.getElementById('extensionChangesCount');
+			const cont = document.getElementById('extensionChangesContainer');
+			if (!cont) return;
+			if (!changes || !Array.isArray(changes) || changes.length === 0){
+				if (countEl) countEl.textContent = '0';
+				cont.innerHTML = '<div class="small-muted">No recorded changes.</div>';
+				return;
+			}
+			if (countEl) countEl.textContent = String(changes.length);
+			cont.innerHTML = changes.slice(0,50).map(c => {
+				const time = c.time ? (new Date(c.time)).toLocaleString() : '';
+				const what = c.description || c.message || c.action || JSON.stringify(c);
+				const who = c.actor ? `<span style="color:var(--vscode-descriptionForeground); font-size:11px; margin-right:6px">${c.actor}</span>` : '';
+				return `<div class=\"issue-item\">${who}<strong>${what}</strong><div class=\"small-muted\">${time}</div></div>`;
+			}).join('');
 		}
 
 		// Request initial context and ensure sound is enabled by default via extension
