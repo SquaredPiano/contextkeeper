@@ -69,6 +69,21 @@ let voiceService;
 let currentContext = null;
 let currentAnalysis = null;
 // autonomous mode is enforced by design; UI toggle removed
+// Recent changes recorded by the extension (to show what ran while UI was closed)
+const extensionChanges = [];
+function recordChange(description, action = 'action', actor = 'extension') {
+    try {
+        extensionChanges.unshift({ time: Date.now(), description, action, actor });
+        if (extensionChanges.length > 200)
+            extensionChanges.pop();
+        // push to webview if available
+        try {
+            sidebarProvider?.postMessage?.({ type: 'extensionChanges', payload: extensionChanges });
+        }
+        catch (e) { }
+    }
+    catch (e) { }
+}
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 function activate(context) {
@@ -99,6 +114,16 @@ function activate(context) {
         catch (e) { }
         // send initial UI state (cast to any since webview message union is limited)
         sidebarProvider.postMessage({ type: 'elevenVoiceState', enabled: true });
+        try {
+            recordChange('ElevenLabs voice enabled on startup', 'voice');
+        }
+        catch (e) { }
+        // send initial notifications state
+        try {
+            const notifEnabled = config.get('notifications.enabled', true);
+            sidebarProvider.postMessage({ type: 'notificationsState', enabled: Boolean(notifEnabled) });
+        }
+        catch (e) { }
     }
     catch (e) {
         // ignore if webview not ready
@@ -136,6 +161,10 @@ function activate(context) {
             });
             outputChannel.show();
             vscode.window.showInformationMessage(`✅ Found ${logs.length} commits!`);
+            try {
+                recordChange(`Viewed git logs — ${logs.length} commits`, 'gitlog');
+            }
+            catch (e) { }
         }
         catch (err) {
             vscode.window.showErrorMessage(`❌ Error: ${err.message}`);
@@ -153,6 +182,10 @@ function activate(context) {
             "https://contextkeeper-worker.workers.dev/lint";
         fileWatcher = new fileWatcher_1.FileWatcher(endpoint);
         fileWatcher.start();
+        try {
+            recordChange('Auto-lint started', 'auto-lint');
+        }
+        catch (e) { }
         vscode.window.showInformationMessage("🔍 Auto-lint enabled! Files will be checked on save.");
     });
     // Command to stop auto-linting
@@ -163,6 +196,10 @@ function activate(context) {
         }
         fileWatcher.stop();
         fileWatcher = null;
+        try {
+            recordChange('Auto-lint stopped', 'auto-lint');
+        }
+        catch (e) { }
         vscode.window.showInformationMessage("⏸️ Auto-lint disabled.");
     });
     context.subscriptions.push(startWatcher);
@@ -225,6 +262,11 @@ function setupServiceListeners() {
                 : 'No issues found. Your code looks great!';
             voiceService.speak(message, 'professional');
         }
+        // Record this action so the webview can show it later
+        try {
+            recordChange(`Analysis completed — ${analysis.issues.length} issues`, 'analysis');
+        }
+        catch (e) { }
     });
     aiService.on('error', (error) => {
         const state = {
@@ -322,6 +364,27 @@ async function handleWebviewMessage(message) {
                 }
                 catch (e) { }
                 vscode.window.showInformationMessage(`Sound ${m.enabled ? 'enabled' : 'disabled'}`);
+                try {
+                    recordChange(`ElevenLabs voice ${m.enabled ? 'enabled' : 'disabled'}`, 'voice');
+                }
+                catch (e) { }
+            }
+            catch (e) { }
+        }
+        if (m.type === 'setNotifications') {
+            try {
+                const cfg = vscode.workspace.getConfiguration('copilot');
+                cfg.update('notifications.enabled', Boolean(m.enabled), true).then(() => { }, () => { });
+                try {
+                    if (NotificationManager_1.NotificationManager && NotificationManager_1.NotificationManager.setEnabled)
+                        NotificationManager_1.NotificationManager.setEnabled(Boolean(m.enabled));
+                }
+                catch (e) { }
+                vscode.window.showInformationMessage(`Notifications ${m.enabled ? 'enabled' : 'disabled'}`);
+                try {
+                    recordChange(`Notifications ${m.enabled ? 'enabled' : 'disabled'}`, 'notifications');
+                }
+                catch (e) { }
             }
             catch (e) { }
         }
