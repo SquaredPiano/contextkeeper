@@ -16,6 +16,9 @@
 
 	"exclude": [
     "src/modules/cloudflare",
+    "src/modules/elevenlabs/test.ts",
+    "src/modules/gemini",
+    "vitest.config.ts",
     "dist",
     "node_modules"
 	]

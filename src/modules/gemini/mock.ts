@@ -1,5 +1,25 @@
+import { GeminiModule } from './index';
+
+interface Analysis {
+  issues: Array<{ line: number; severity: string; message: string }>;
+  suggestions: string[];
+  risk_level: string;
+}
+
 export class MockGemini implements GeminiModule {
-  async analyzeCode(code: string): Promise<Analysis> {
+  async initialize(apiKey: string): Promise<void> {
+    // Mock initialization
+  }
+
+  isReady(): boolean {
+    return true;
+  }
+
+  enableMockMode(): void {
+    // Already in mock mode
+  }
+
+  async analyzeCode(code: string, context?: any): Promise<Analysis> {
     return {
       issues: [
         { line: 10, severity: 'error', message: 'Undefined variable "user"' },
@@ -22,6 +42,13 @@ describe('calculateTotal', () => {
   });
 });
     `.trim();
+  }
+
+  async fixError(code: string, error: string): Promise<{ fixedCode: string; confidence: number }> {
+    return {
+      fixedCode: code,
+      confidence: 0.8
+    };
   }
 }
 
