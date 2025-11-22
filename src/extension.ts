@@ -1,7 +1,8 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
-import { getLogsWithGitlog } from "./gitlogs/gitlog";
+import { getLogsWithGitlog } from "./modules/gitlogs/gitlog";
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -33,7 +34,7 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.window.createOutputChannel("ContextKeeper");
         outputChannel.clear();
         outputChannel.appendLine("=== Recent Git Commits ===");
-        logs.forEach((commit, i) => {
+        logs.forEach((commit: any, i: number) => {
           outputChannel.appendLine(`\n${i + 1}. ${commit.subject}`);
           outputChannel.appendLine(`   Author: ${commit.authorName}`);
           outputChannel.appendLine(`   Hash: ${commit.hash}`);
