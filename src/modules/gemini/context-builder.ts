@@ -9,7 +9,9 @@ export class ContextBuilder {
       activeFile = null,
       errors = [],
       editHistory = [],
-      fileContents = new Map()
+      fileContents = new Map(),
+      projectStructure,
+      dependencies
     } = raw;
 
     // 1. Identify related files based on active file
@@ -36,7 +38,9 @@ export class ContextBuilder {
       gitDiffSummary: diffSummary,
       editCount: editHistory.length,
       relatedFiles: relatedFiles,
-      openFileContents: openFileContents
+      openFileContents: openFileContents,
+      projectStructure,
+      dependencies
     };
   }
 }

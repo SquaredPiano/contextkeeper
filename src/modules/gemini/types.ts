@@ -58,4 +58,6 @@ export interface RawLogInput {
   // New fields
   fileContents?: Map<string, string>;
   workspaceRoot?: string;
+  projectStructure?: string;
+  dependencies?: string[];
 }

@@ -4,8 +4,12 @@ import { readAllFilesHandler, FileData } from "../gitlogs/fileReader";
 import { CloudflareClient, CloudflareLintResult } from "../cloudflare/client";
 import { GeminiClient } from "../gemini/gemini-client";
 import { ContextBuilder } from "../gemini/context-builder";
-import { GeminiContext, Analysis } from "../gemini/types";
+import { GeminiContext, Analysis, BatchAnalysisResult } from "../gemini/types";
 import { EventEmitter } from "events";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execAsync = promisify(exec);
 
 /**
  * CollectedContext
@@ -166,6 +170,7 @@ export class Orchestrator extends EventEmitter {
    *  - collect context
    *  - decide which files to analyze
    *  - send each file to lint + AI analysis
+   *  - Uses batch processing when analyzing multiple files for efficiency
    */
   async runPipeline(): Promise<PipelineResult> {
     this.emit("pipelineStarted");
@@ -173,11 +178,21 @@ export class Orchestrator extends EventEmitter {
       const context = await this.collectContext();
       const filesToAnalyze = this.getFilesToAnalyze(context);
 
-      const fileAnalyses: FileAnalysisResult[] = [];
-      for (const file of filesToAnalyze) {
-        const result = await this.analyzeFile(file, context);
-        fileAnalyses.push(result);
+      if (filesToAnalyze.length === 0) {
+        const result: PipelineResult = {
+          context,
+          fileAnalyses: [],
+          summary: { totalFiles: 0, filesWithIssues: 0, totalIssues: 0, overallRiskLevel: "none" },
+        };
+        this.emit("pipelineComplete", result);
+        return result;
       }
+
+      // Use batch processing for multiple files, single file for one
+      const fileAnalyses: FileAnalysisResult[] =
+        filesToAnalyze.length > 1 && this.geminiClient.isReady()
+          ? await this.analyzeFilesBatch(filesToAnalyze, context)
+          : await this.analyzeFilesSequential(filesToAnalyze, context);
 
       const result: PipelineResult = {
         context,
@@ -191,6 +206,128 @@ export class Orchestrator extends EventEmitter {
       this.emit("pipelineError", error);
       throw error;
     }
+  }
+
+  /**
+   * Analyze multiple files using batch processing (more efficient).
+   * Falls back to sequential if batch fails.
+   */
+  private async analyzeFilesBatch(
+    files: FileData[],
+    context: CollectedContext
+  ): Promise<FileAnalysisResult[]> {
+    this.emit("pipelineProgress", `Using batch processing for ${files.length} files...`);
+
+    // First, run Cloudflare linting for all files
+    const lintResults = new Map<string, CloudflareLintResult | null>();
+    for (const file of files) {
+      try {
+        const lintResult = await this.cloudflareClient.lint(file.content);
+        lintResults.set(file.filePath, lintResult);
+      } catch {
+        lintResults.set(file.filePath, null);
+      }
+    }
+
+    // Build context for batch processing
+    const gemContext = await this.buildGeminiContextForFiles(files, context, lintResults);
+
+    // Prepare file contents map for batch
+    const fileContents = new Map<string, string>();
+    for (const file of files) {
+      // Use fixed code if auto-fix was applied
+      const lintResult = lintResults.get(file.filePath);
+      const content =
+        lintResult?.fixed && lintResult.linted && lintResult.severity !== "high"
+          ? lintResult.fixed
+          : file.content;
+      fileContents.set(file.filePath, content);
+    }
+
+    // Run batch analysis
+    let batchResult: BatchAnalysisResult | null = null;
+    try {
+      if (this.geminiClient.isReady()) {
+        batchResult = await this.geminiClient.runBatch(fileContents, gemContext);
+      }
+    } catch (error) {
+      console.warn("[Orchestrator] Batch analysis failed, falling back to sequential:", error);
+      return this.analyzeFilesSequential(files, context);
+    }
+
+    // Combine lint results with batch analysis results
+    const fileAnalyses: FileAnalysisResult[] = files.map((file) => {
+      const lintResult = lintResults.get(file.filePath) || null;
+      const batchFileResult = batchResult?.files.find((f) => f.file === file.filePath);
+
+      const analysis: FileAnalysisResult = {
+        filePath: file.filePath,
+        lintResult,
+        geminiAnalysis: batchFileResult?.analysis || null,
+        errors: [],
+      };
+
+      // Apply fix action logic
+      if (lintResult?.fixed && lintResult.linted) {
+        const original = file.content;
+        const fixed = lintResult.fixed;
+        const diff = Math.abs(fixed.length - original.length);
+
+        let type: "auto" | "prompt" | "none" = "none";
+        let reason = "";
+
+        if (lintResult.severity === "high") {
+          type = "none";
+          reason = "High-risk or security-sensitive change";
+        } else if (diff < 20 && (lintResult.severity === "low" || lintResult.severity === "medium")) {
+          type = "auto";
+          reason = "Minor safe formatting or style fix";
+        } else {
+          type = "prompt";
+          reason = "Potential code-behavior change";
+        }
+
+        analysis.fixAction = { type, fixedCode: fixed, originalCode: original, reason };
+
+        // Smart override with batch analysis
+        if (type === "prompt" && batchFileResult?.analysis) {
+          const geminiAnalysis = batchFileResult.analysis;
+          const isLowRisk = geminiAnalysis.risk_level === "low";
+          const hasFewIssues = (geminiAnalysis.issues?.length || 0) <= 2;
+          const hasOnlyWarnings =
+            geminiAnalysis.issues?.every(
+              (issue) => issue.severity === "warning" || issue.severity === "info"
+            ) ?? false;
+
+          if (isLowRisk && hasFewIssues && hasOnlyWarnings) {
+            analysis.fixAction.type = "auto";
+            analysis.fixAction.reason = "Confirmed by Gemini deep analysis (low risk, minor issues)";
+          }
+        }
+      }
+
+      return analysis;
+    });
+
+    return fileAnalyses;
+  }
+
+  /**
+   * Analyze files sequentially (one by one).
+   * Used as fallback or for single file analysis.
+   */
+  private async analyzeFilesSequential(
+    files: FileData[],
+    context: CollectedContext
+  ): Promise<FileAnalysisResult[]> {
+    const fileAnalyses: FileAnalysisResult[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      this.emit("pipelineProgress", `Analyzing ${file.filePath} (${i + 1}/${files.length})...`);
+      const result = await this.analyzeFile(file, context);
+      fileAnalyses.push(result);
+    }
+    return fileAnalyses;
   }
 
   /**
@@ -247,31 +384,19 @@ export class Orchestrator extends EventEmitter {
     }
 
     /** PREP CONTEXT FOR GEMINI **/
-    const rawLogInput = {
-      gitLogs: context.git.commits.slice(0, 10).map((commit: any) => {
-        if (typeof commit === "string") return commit;
-        return `${commit.hash || ""} - ${commit.subject || commit.message || ""}`;
-      }),
-      gitDiff: "",
-      openFiles: context.files.openFiles,
-      activeFile: file.filePath,
-      errors: lintResult?.warnings?.map((w) => w.message) || [],
-      editHistory: context.files.recentlyEdited.map((e) => ({
-        file: e.file,
-        timestamp: e.timestamp.getTime(),
-      })),
-      fileContents: new Map<string, string>([[file.filePath, file.content]]),
-      workspaceRoot: context.workspace.rootPath,
-    };
+    const rawLogInput = await this.buildRawLogInput(file, context, lintResult);
 
     const gemContext: GeminiContext = ContextBuilder.build(rawLogInput);
 
-    // Try Gemini analysis
+    // Try Gemini analysis (only if ready)
     try {
-      // If we auto-fixed, analyze THAT. Otherwise analyze original.
-      const codeForGemini = analysis.fixAction?.type === "auto" ? analysis.fixAction.fixedCode : file.content;
-      geminiAnalysis = await this.geminiClient.analyzeCode(codeForGemini, gemContext);
-      analysis.geminiAnalysis = geminiAnalysis;
+      if (!this.geminiClient.isReady()) {
+        errors.push("Gemini client not initialized");
+      } else {
+        // If we auto-fixed, analyze THAT. Otherwise analyze original.
+        const codeForGemini = analysis.fixAction?.type === "auto" ? analysis.fixAction.fixedCode : file.content;
+        geminiAnalysis = await this.geminiClient.analyzeCode(codeForGemini, gemContext);
+        analysis.geminiAnalysis = geminiAnalysis;
 
       /**
        * Smart override:
@@ -291,11 +416,202 @@ export class Orchestrator extends EventEmitter {
           analysis.fixAction.reason = "Confirmed by Gemini deep analysis (low risk, minor issues)";
         }
       }
-    } catch {
-      errors.push("Gemini analysis failed");
+      }
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      errors.push(`Gemini analysis failed: ${errorMsg}`);
+      console.warn(`[Orchestrator] Gemini analysis error for ${file.filePath}:`, error);
+      // Continue without Gemini analysis - we still have lint results
     }
 
     return analysis;
+  }
+
+  /**
+   * Build raw log input for ContextBuilder.
+   * Includes git diff, project structure, and better context.
+   */
+  private async buildRawLogInput(
+    file: FileData,
+    context: CollectedContext,
+    lintResult: CloudflareLintResult | null
+  ): Promise<import("../gemini/types").RawLogInput> {
+    // Get git diff for this file
+    let gitDiff = "";
+    if (context.workspace.rootPath) {
+      try {
+        const { stdout } = await execAsync(`git diff HEAD -- "${file.filePath}"`, {
+          cwd: context.workspace.rootPath,
+          timeout: 2000,
+        });
+        gitDiff = stdout || "";
+      } catch {
+        // Git diff failed, try unstaged changes
+        try {
+          const { stdout } = await execAsync(`git diff -- "${file.filePath}"`, {
+            cwd: context.workspace.rootPath,
+            timeout: 2000,
+          });
+          gitDiff = stdout || "";
+        } catch {
+          // No git diff available, continue without it
+        }
+      }
+    }
+
+    // Get project structure (package.json, tsconfig.json, etc.)
+    const projectStructure = await this.getProjectStructure(context.workspace.rootPath);
+
+    // Get dependencies from package.json if available
+    const dependencies = await this.getDependencies(context.workspace.rootPath);
+
+    return {
+      gitLogs: context.git.commits.slice(0, 10).map((commit: any) => {
+        if (typeof commit === "string") return commit;
+        return `${commit.hash || ""} - ${commit.subject || commit.message || ""}`;
+      }),
+      gitDiff,
+      openFiles: context.files.openFiles,
+      activeFile: file.filePath,
+      errors: lintResult?.warnings?.map((w) => w.message) || [],
+      editHistory: context.files.recentlyEdited.map((e) => ({
+        file: e.file,
+        timestamp: e.timestamp.getTime(),
+      })),
+      fileContents: new Map<string, string>([[file.filePath, file.content]]),
+      workspaceRoot: context.workspace.rootPath,
+      projectStructure,
+      dependencies,
+    };
+  }
+
+  /**
+   * Build Gemini context for batch processing.
+   */
+  private async buildGeminiContextForFiles(
+    files: FileData[],
+    context: CollectedContext,
+    lintResults: Map<string, CloudflareLintResult | null>
+  ): Promise<GeminiContext> {
+    // Collect all errors from lint results
+    const allErrors: string[] = [];
+    for (const [filePath, lintResult] of lintResults.entries()) {
+      if (lintResult?.warnings) {
+        allErrors.push(...lintResult.warnings.map((w) => w.message));
+      }
+    }
+
+    // Get git diff for all files (combined)
+    let combinedGitDiff = "";
+    if (context.workspace.rootPath) {
+      try {
+        const filePaths = files.map((f) => `"${f.filePath}"`).join(" ");
+        const { stdout } = await execAsync(`git diff HEAD -- ${filePaths}`, {
+          cwd: context.workspace.rootPath,
+          timeout: 3000,
+        });
+        combinedGitDiff = stdout || "";
+      } catch {
+        // Try unstaged
+        try {
+          const filePaths = files.map((f) => `"${f.filePath}"`).join(" ");
+          const { stdout } = await execAsync(`git diff -- ${filePaths}`, {
+            cwd: context.workspace.rootPath,
+            timeout: 3000,
+          });
+          combinedGitDiff = stdout || "";
+        } catch {
+          // No diff available
+        }
+      }
+    }
+
+    const projectStructure = await this.getProjectStructure(context.workspace.rootPath);
+    const dependencies = await this.getDependencies(context.workspace.rootPath);
+
+    const rawLogInput = {
+      gitLogs: context.git.commits.slice(0, 10).map((commit: any) => {
+        if (typeof commit === "string") return commit;
+        return `${commit.hash || ""} - ${commit.subject || commit.message || ""}`;
+      }),
+      gitDiff: combinedGitDiff,
+      openFiles: context.files.openFiles,
+      activeFile: files[0]?.filePath || undefined,
+      errors: allErrors.slice(0, 10), // Limit errors
+      editHistory: context.files.recentlyEdited.map((e) => ({
+        file: e.file,
+        timestamp: e.timestamp.getTime(),
+      })),
+      fileContents: new Map<string, string>(),
+      workspaceRoot: context.workspace.rootPath,
+      projectStructure,
+      dependencies,
+    };
+
+    return ContextBuilder.build(rawLogInput);
+  }
+
+  /**
+   * Get project structure summary (package.json, tsconfig, etc.)
+   */
+  private async getProjectStructure(rootPath?: string): Promise<string | undefined> {
+    if (!rootPath) return undefined;
+
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+
+      const structure: string[] = [];
+
+      // Check for package.json
+      try {
+        const packageJsonPath = path.join(rootPath, "package.json");
+        const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
+        structure.push(`Project: ${packageJson.name || "unknown"}`);
+        structure.push(`Type: ${packageJson.type || "commonjs"}`);
+        if (packageJson.scripts) {
+          structure.push(`Scripts: ${Object.keys(packageJson.scripts).join(", ")}`);
+        }
+      } catch {
+        // No package.json
+      }
+
+      // Check for TypeScript config
+      try {
+        const tsconfigPath = path.join(rootPath, "tsconfig.json");
+        await fs.access(tsconfigPath);
+        structure.push("TypeScript: configured");
+      } catch {
+        // No tsconfig
+      }
+
+      return structure.length > 0 ? structure.join("\n") : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Get dependencies from package.json
+   */
+  private async getDependencies(rootPath?: string): Promise<string[] | undefined> {
+    if (!rootPath) return undefined;
+
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const packageJsonPath = path.join(rootPath, "package.json");
+      const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf-8"));
+
+      const deps = [
+        ...Object.keys(packageJson.dependencies || {}),
+        ...Object.keys(packageJson.devDependencies || {}),
+      ];
+
+      return deps.length > 0 ? deps.slice(0, 20) : undefined; // Limit to 20
+    } catch {
+      return undefined;
+    }
   }
 
   /**
