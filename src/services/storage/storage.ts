@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
-import { IStorageService, StorageEvent, DeveloperContext } from '../interfaces';
+import { IStorageService } from '../interfaces';
 import { EventRecord, SessionRecord, ActionRecord } from './schema';
 import { GeminiService } from '../real/GeminiService';
 
@@ -17,22 +17,37 @@ export class LanceDBStorage implements IStorageService {
   constructor() { }
 
   /**
-   * Connects to the local LanceDB instance.
+   * Connects to LanceDB Cloud or falls back to local instance.
    * @param embeddingService Optional service for generating embeddings.
    */
   async connect(embeddingService?: GeminiService): Promise<void> {
     try {
       this.embeddingService = embeddingService;
-      const dbPath = path.join(os.homedir(), '.contextkeeper', 'lancedb');
+      
+      // Check for LanceDB Cloud credentials
+      const apiKey = process.env.LANCE_DB_API_KEY;
+      const dbName = process.env.LANCEDB_DB_NAME || 'contextkeeper';
+      
+      if (apiKey) {
+        // Connect to LanceDB Cloud
+        const cloudUri = `db://${dbName}`;
+        console.log('Connecting to LanceDB Cloud:', cloudUri);
+        this.db = await lancedb.connect(cloudUri, { apiKey });
+        console.log('Connected to LanceDB Cloud successfully');
+      } else {
+        // Fallback to local LanceDB
+        console.log('LANCE_DB_API_KEY not found, using local LanceDB');
+        const dbPath = path.join(os.homedir(), '.contextkeeper', 'lancedb');
 
-      if (!fs.existsSync(dbPath)) {
-        fs.mkdirSync(dbPath, { recursive: true });
+        if (!fs.existsSync(dbPath)) {
+          fs.mkdirSync(dbPath, { recursive: true });
+        }
+
+        this.db = await lancedb.connect(dbPath);
+        console.log('Connected to local LanceDB at', dbPath);
       }
 
-      this.db = await lancedb.connect(dbPath);
-
       await this.initializeTables();
-      console.log('Connected to LanceDB at', dbPath);
     } catch (error) {
       console.error('Failed to connect to LanceDB:', error);
       // We don't throw here to allow the extension to activate even if DB fails, 
@@ -113,6 +128,7 @@ export class LanceDBStorage implements IStorageService {
       metadata: typeof event.metadata === 'string' ? event.metadata : JSON.stringify(event.metadata || {})
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await this.eventsTable.add([record as any]);
   }
 
@@ -130,6 +146,7 @@ export class LanceDBStorage implements IStorageService {
       event_count: 0
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await this.sessionsTable.add([session as any]);
     return session;
   }
@@ -146,6 +163,7 @@ export class LanceDBStorage implements IStorageService {
       files: typeof action.files === 'string' ? action.files : JSON.stringify(action.files || [])
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await this.actionsTable.add([record as any]);
   }
 
@@ -280,7 +298,7 @@ export class LanceDBStorage implements IStorageService {
     for (const table of tables) {
       try {
         await this.db.dropTable(table);
-      } catch (e) {
+      } catch {
         // Ignore if table doesn't exist
       }
     }

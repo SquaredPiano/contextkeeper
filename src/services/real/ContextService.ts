@@ -6,10 +6,10 @@ import {
 	IAIService,
 	DeveloperContext,
 	GitCommit,
-	FileDiff,
 	FileEdit,
 	EditEvent,
 	FileEvent,
+	EventRecord
 } from '../interfaces';
 import { getDocumentSymbols, findFunctionAtPosition } from '../../utils/symbolUtils';
 import { ContextBuilder } from '../../modules/gemini/context-builder';
@@ -72,8 +72,9 @@ export class ContextService extends EventEmitter implements IContextService {
 			this.emit('contextCollected', context);
 			return context;
 
-		} catch (error: any) {
-			console.error('Error collecting context:', error);
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error);
+			console.error('Error collecting context:', errorMsg, error);
 			this.emit('error', error);
 			throw error;
 		}
@@ -120,7 +121,7 @@ export class ContextService extends EventEmitter implements IContextService {
 
 			return message;
 
-		} catch (error: any) {
+		} catch (error) {
 			console.error('Error getting context summary:', error);
 			return "Welcome back. I had some trouble retrieving your exact context, but I'm ready to help.";
 		}
@@ -141,7 +142,7 @@ export class ContextService extends EventEmitter implements IContextService {
 	/**
 	 * Process Git events from logs and get current git state
 	 */
-	private async processGitEvents(events: any[]): Promise<DeveloperContext['git']> {
+	private async processGitEvents(events: EventRecord[]): Promise<DeveloperContext['git']> {
 		const commits: GitCommit[] = events
 			.filter(e => e.event_type === 'git_commit')
 			.map(e => {
@@ -197,15 +198,19 @@ export class ContextService extends EventEmitter implements IContextService {
 
 		return {
 			recentCommits: commits,
-			currentBranch: currentBranch,
-			uncommittedChanges: uncommittedChanges,
+			currentBranch: currentBranch || 'unknown',
+			uncommittedChanges: uncommittedChanges.map(file => ({
+				file: file,
+				linesAdded: 0,
+				linesRemoved: 0
+			})),
 		};
 	}
 
 	/**
 	 * Collect file-related context (VS Code API + DB History)
 	 */
-	private async collectFileContext(events: any[]): Promise<DeveloperContext['files']> {
+	private async collectFileContext(events: EventRecord[]): Promise<DeveloperContext['files']> {
 		// Current Open Files (VS Code API)
 		const openFiles = vscode.workspace.textDocuments
 			.filter(doc => doc.uri.scheme === 'file')
@@ -246,7 +251,7 @@ export class ContextService extends EventEmitter implements IContextService {
 	/**
 	 * Process Timeline (DB History)
 	 */
-	private processTimeline(events: any[]): DeveloperContext['timeline'] {
+	private processTimeline(events: EventRecord[]): DeveloperContext['timeline'] {
 		const edits: EditEvent[] = events
 			.filter(e => e.event_type === 'file_edit')
 			.map(e => {
@@ -283,7 +288,7 @@ export class ContextService extends EventEmitter implements IContextService {
 	/**
 	 * Process Session Stats
 	 */
-	private processSession(events: any[]): DeveloperContext['session'] {
+	private processSession(events: EventRecord[]): DeveloperContext['session'] {
 		const editEvents = events.filter(e => e.event_type === 'file_edit');
 
 		// Calculate risky files (edited frequently)
@@ -332,7 +337,7 @@ export class ContextService extends EventEmitter implements IContextService {
 			if (symbols) {
 				currentFunction = findFunctionAtPosition(symbols, position) || '';
 			}
-		} catch (e) {
+		} catch {
 			// Ignore symbol provider errors
 		}
 

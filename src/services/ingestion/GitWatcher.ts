@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import * as cp from 'child_process';
-import * as util from 'util';
-
-const exec = util.promisify(cp.exec);
+import { promisify } from 'util';
+import { exec as execCb } from 'child_process';
 import { GitService } from '../../modules/gitlogs/GitService';
+
+const execAsync = promisify(execCb);
 
 export interface GitCommitEvent {
   hash: string;
@@ -28,7 +28,7 @@ interface GitAPI {
 interface Repository {
     rootUri: vscode.Uri;
     state: RepositoryState;
-    log(options?: any): Promise<Commit[]>;
+    log(options?: Record<string, unknown>): Promise<Commit[]>;
 }
 
 interface RepositoryState {
@@ -113,7 +113,6 @@ export class GitWatcher extends EventEmitter {
       
       if (currentHash && currentHash !== this.lastCommitHash) {
           // Commit changed!
-          const oldHash = this.lastCommitHash;
           this.lastCommitHash = currentHash;
 
           // Fetch commit details
@@ -125,14 +124,10 @@ export class GitWatcher extends EventEmitter {
               if (commits.length > 0) {
                   const commit = commits[0];
                   
-                  // Get file list from GitService
+                  // Get file list from git
                   let files: string[] = [];
                   try {
                       // Use git show to get files changed in this commit
-                      const { exec } = await import('child_process');
-                      const { promisify } = await import('util');
-                      const execAsync = promisify(exec);
-                      
                       const { stdout } = await execAsync(
                           `git show --name-only --pretty=format: ${commit.hash}`,
                           { cwd: this.workspaceRoot, timeout: 2000 }

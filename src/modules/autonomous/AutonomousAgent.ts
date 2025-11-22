@@ -22,19 +22,64 @@ export class AutonomousAgent {
         // 1. Auto-Lint Task
         this.taskRegistry.register({
             name: 'auto-lint',
-            description: 'Lint code using Cloudflare Worker',
+            description: 'Lint code using Cloudflare Worker and commit results',
             run: async (context: DeveloperContext) => {
-                console.log('Running Auto-Lint...');
-                // In a real app, we'd read the active file from context
+                console.log('[AutonomousAgent] Running Auto-Lint...');
                 const editor = vscode.window.activeTextEditor;
-                const code = editor ? editor.document.getText() : "console.log('hello');"; 
-                const language = editor ? editor.document.languageId : 'typescript';
+                
+                if (!editor) {
+                    console.log('[AutonomousAgent] No active editor for linting');
+                    vscode.window.showWarningMessage('No active file to lint');
+                    return;
+                }
 
-                const results = await this.cloudflareService.lintCode(code, language);
-                if (results.length > 0) {
-                    vscode.window.showWarningMessage(`Lint Issues: ${results.map(r => r.message).join(', ')}`);
-                } else {
-                    console.log('No lint issues found.');
+                const document = editor.document;
+                const code = document.getText();
+                const language = document.languageId;
+                const fileName = document.fileName;
+
+                try {
+                    const results = await this.cloudflareService.lintCode(code, language);
+                    
+                    if (results.length > 0) {
+                        const message = `Found ${results.length} lint issues`;
+                        console.log(`[AutonomousAgent] ${message}:`, results.map(r => r.message));
+                        vscode.window.showWarningMessage(
+                            `${message}: ${results.slice(0, 3).map(r => r.message).join(', ')}${results.length > 3 ? '...' : ''}`
+                        );
+                        
+                        // Create a lint report comment in the file
+                        const lintReport = [
+                            '',
+                            '// ============ AUTONOMOUS LINT REPORT ============',
+                            `// Generated: ${new Date().toISOString()}`,
+                            `// Issues Found: ${results.length}`,
+                            ...results.map(r => `// - Line ${r.line}: ${r.message}`),
+                            '// =================================================',
+                            ''
+                        ].join('\n');
+                        
+                        // Add lint report to top of file
+                        const edit = new vscode.WorkspaceEdit();
+                        edit.insert(document.uri, new vscode.Position(0, 0), lintReport);
+                        await vscode.workspace.applyEdit(edit);
+                        await document.save();
+                        
+                        // Commit the lint report
+                        const relativePath = vscode.workspace.asRelativePath(fileName);
+                        await this.gitService.commit(
+                            `chore: Add lint report for ${relativePath} (${results.length} issues)`,
+                            [fileName]
+                        );
+                        
+                        console.log('[AutonomousAgent] Lint report committed');
+                    } else {
+                        console.log('[AutonomousAgent] No lint issues found');
+                        vscode.window.showInformationMessage('✅ No lint issues found');
+                    }
+                } catch (error) {
+                    console.error('[AutonomousAgent] Lint task failed:', error);
+                    throw error;
                 }
             }
         });
@@ -80,25 +125,28 @@ export class AutonomousAgent {
             // 3. Create a new branch for this session
             const safeGoalName = sessionGoal.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().substring(0, 30);
             const branchName = `copilot/${safeGoalName}-${Date.now()}`;
+            
+            console.log(`[AutonomousAgent] Creating branch: ${branchName}`);
             await this.gitService.createBranch(branchName);
             vscode.window.showInformationMessage(`Started autonomous session on branch: ${branchName}`);
 
-            // 4. Execute goal -> Map goal to tasks
-            // Simple heuristic for "Thin Path":
-            const lowerGoal = sessionGoal.toLowerCase();
-            if (lowerGoal.includes('lint')) {
-                await this.runTask('auto-lint', context);
-            } else if (lowerGoal.includes('fix') || lowerGoal.includes('repair')) {
-                await this.runTask('auto-fix', context);
-            } else if (lowerGoal.includes('test')) {
-                await this.runTask('generate-tests', context);
-            } else {
-                // Default: Run all
-                await this.runTask('auto-lint', context);
-                await this.runTask('auto-fix', context);
-            }
+            // 4. Execute tasks sequentially
+            // Phase 1: Linting (deterministic)
+            console.log('[AutonomousAgent] Phase 1: Running linting...');
+            await this.runTask('auto-lint', context);
+            
+            // Phase 2: Test generation (creative)
+            console.log('[AutonomousAgent] Phase 2: Generating tests...');
+            await this.runTask('generate-tests', context);
+            
+            // 5. Show completion summary
+            vscode.window.showInformationMessage(
+                `✅ Autonomous work complete on branch ${branchName}!\n` +
+                `Completed: Linting and Test Generation`
+            );
 
         } catch (error: any) {
+            console.error('[AutonomousAgent] Session failed:', error);
             vscode.window.showErrorMessage(`Autonomous session failed: ${error.message}`);
         } finally {
             this.isRunning = false;

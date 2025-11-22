@@ -39,8 +39,9 @@ export async function readAllFilesHandler(options: FileReaderOptions = {}): Prom
   const includePattern = options.includePattern || "**/*.{ts,js,tsx,jsx,json,md}";
   const excludePattern = options.excludePattern || "{**/node_modules/**,**/.git/**,**/dist/**,**/out/**,**/build/**}";
 
+  const channel = getOutputChannel();
+  
   try {
-    const channel = getOutputChannel();
     channel.appendLine(`[${new Date().toISOString()}] Starting file scan...`);
     console.log(`[FileReader] Starting file scan in workspace: ${workspaceRoot}`);
     
@@ -118,6 +119,7 @@ export async function readAllFilesHandler(options: FileReaderOptions = {}): Prom
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     const msg = `Error reading files: ${errorMsg}`;
+    const channel = getOutputChannel();
     channel.appendLine(`❌ ${msg}`);
     vscode.window.showErrorMessage(msg);
     console.error(`[FileReader] ${msg}`, error);

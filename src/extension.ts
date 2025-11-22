@@ -7,14 +7,13 @@ import * as path from "path";
 // Load environment variables from .env.local
 dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
 
-import { getLogsWithGitlog } from "./modules/gitlogs/gitlog";
-import { FileWatcher } from "./modules/gitlogs/fileWatcher";
 import { LintingService } from "./modules/gitlogs/LintingService";
 import { ContextIngestionService } from "./services/ingestion/ContextIngestionService";
 import { IngestionVerifier } from "./services/ingestion/IngestionVerifier";
 import { AutonomousAgent } from './modules/autonomous/AutonomousAgent';
 import { DashboardProvider } from './ui/DashboardProvider';
 import { IdleService } from './modules/idle-detector/idle-service';
+import { registerTestCommand } from './test/test-autonomous-pipeline';
 
 // Import real services
 import { ContextService } from './services/real/ContextService';
@@ -62,7 +61,6 @@ let autonomousAgent: AutonomousAgent;
 
 // State
 let currentContext: DeveloperContext | null = null;
-let currentAnalysis: AIAnalysis | null = null;
 let isAutonomousMode = false;
 
 // This method is called when your extension is activated
@@ -126,7 +124,7 @@ export async function activate(context: vscode.ExtensionContext) {
         realVoiceService.initialize(elevenLabsApiKey);
         console.log("ElevenLabs Service initialized");
         voiceService = realVoiceService;
-      } catch (err: any) {
+      } catch (err) {
         console.error("Failed to initialize ElevenLabs:", err);
       }
     } else {
@@ -206,7 +204,7 @@ export async function activate(context: vscode.ExtensionContext) {
     autonomousAgent = new AutonomousAgent(gitService, geminiService, contextService);
 
     // 5. Initialize Idle Detection Service
-    idleService = new IdleService(storageService, { thresholdMs: 15000 }); // 15 seconds for demo
+    idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService); // 15 seconds for demo, pass Gemini
     await idleService.initialize();
     
     // Wire idle detection to autonomous agent
@@ -221,11 +219,14 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       } catch (error) {
         console.error('Autonomous task failed:', error);
-        vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? (error instanceof Error ? error.message : String(error)) : 'Unknown error'}`);
       }
     });
 
     context.subscriptions.push(idleService);
+
+    // Register Test Command
+    registerTestCommand(context);
 
     // Register Verification Command
     context.subscriptions.push(
@@ -236,9 +237,9 @@ export async function activate(context: vscode.ExtensionContext) {
     );
 
     console.log('ContextKeeper: Extension Activated');
-  } catch (error: any) {
+  } catch (error) {
     console.error("Extension activation failed:", error);
-    vscode.window.showErrorMessage(`Autonomous Copilot failed to activate: ${error.message}`);
+    vscode.window.showErrorMessage(`Autonomous Copilot failed to activate: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 
@@ -274,8 +275,6 @@ function setupServiceListeners() {
   });
 
   aiService.on('analysisComplete', (analysis: AIAnalysis) => {
-    currentAnalysis = analysis;
-
     // Update UI components
     const state: ExtensionState = {
       status: 'complete',
@@ -312,7 +311,7 @@ function setupServiceListeners() {
 /**
  * Register all extension commands
  */
-function registerCommands(context: vscode.ExtensionContext) {
+function _registerCommands(context: vscode.ExtensionContext) {
   // Analyze command
   context.subscriptions.push(
     vscode.commands.registerCommand('copilot.analyze', async () => {
@@ -363,8 +362,9 @@ function registerCommands(context: vscode.ExtensionContext) {
             new vscode.Range(position, position),
             vscode.TextEditorRevealType.InCenter
           );
-        } catch (error: any) {
-          NotificationManager.showError(`Cannot open file: ${error.message}`);
+        } catch (error) {
+          const errorMsg = error instanceof Error ? (error instanceof Error ? error.message : String(error)) : String(error);
+          NotificationManager.showError(`Cannot open file: ${errorMsg}`);
         }
       }
     )
@@ -372,7 +372,7 @@ function registerCommands(context: vscode.ExtensionContext) {
 
   // Apply fix (placeholder for future implementation)
   context.subscriptions.push(
-    vscode.commands.registerCommand('copilot.applyFix', async (issueId: string) => {
+    vscode.commands.registerCommand('copilot.applyFix', async (_issueId: string) => {
       NotificationManager.showSuccess('Fix application coming soon!');
     })
   );
@@ -421,8 +421,8 @@ async function refreshContext(): Promise<void> {
     const context = await contextService.collectContext();
     currentContext = context;
     sidebarProvider.updateContext(context);
-  } catch (error: any) {
-    NotificationManager.showError(`Failed to collect context: ${error.message}`);
+  } catch (error) {
+    NotificationManager.showError(`Failed to collect context: ${(error instanceof Error ? error.message : String(error))}`);
   }
 }
 
@@ -458,16 +458,17 @@ async function runAnalysis(): Promise<void> {
       }
     );
 
-  } catch (error: any) {
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
     const state: ExtensionState = {
       status: 'error',
-      error: error.message,
+      error: errorMsg,
     };
     statusBar.setState(state);
-    sidebarProvider.showError(error.message);
+    sidebarProvider.showError(errorMsg);
 
     await NotificationManager.showErrorWithRetry(
-      `Analysis failed: ${error.message}`,
+      `Analysis failed: ${errorMsg}`,
       () => runAnalysis()
     );
   }
