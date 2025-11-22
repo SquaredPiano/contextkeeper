@@ -20,6 +20,14 @@
       {
         "command": "contextkeeper.testGitlog",
         "title": "ContextKeeper: Test Git Logs"
+      },
+      {
+        "command": "contextkeeper.startAutoLint",
+        "title": "ContextKeeper: Enable Auto-Lint on Save"
+      },
+      {
+        "command": "contextkeeper.stopAutoLint",
+        "title": "ContextKeeper: Disable Auto-Lint"
       }
     ]
   },
