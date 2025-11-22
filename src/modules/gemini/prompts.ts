@@ -1,46 +1,60 @@
+// src/modules/gemini/prompts.ts
+
+import type { CodeContext } from "./types";
+
 export class PromptTemplates {
   static codeAnalysis(code: string, context: CodeContext): string {
-    return  `
+    return `
+Analyze this code and return:
+- issues with line numbers
+- suggestions
+- risk level
 
-    You are a code quality assistant. Analyze this code and provide:
-1. Linting issues (with line numbers)
-2. Logic errors or bugs
-3. Performance improvements
-4. Code smell patterns
+Recent commits: ${context.recentCommits}
+Edit frequency: ${context.editCount}
+Related files: ${context.relatedFiles.join(", ")}
 
-Context:
-- Recent commits: ${context.recentCommits}
-- File edit frequency: ${context.editCount}
-- Related files: ${context.relatedFiles}
-- Active file: ${context.activeFile}
-- Recent commits: ${context.recentCommits.join(", ")}
-- Recent errors: ${context.recentErrors.join(", ")}
-- Edit count: ${context.editCount}
-- Related files: ${context.relatedFiles.join(", ")}
-- Git diff summary: 
-${context.gitDiffSummary}
-
-Code:
-\`\`\`
+CODE:
+\`\`\`ts
 ${code}
 \`\`\`
-Respond in JSON format:
-{th
-  "issues": [{"line": 10, "severity": "error", "message": "..."}],
-  "suggestions": ["..."],
+
+Respond USING JSON:
+{
+  "issues": [...],
+  "suggestions": [...],
   "risk_level": "low|medium|high"
-    "summary": "string"
 }
     `.trim();
   }
-  
-  static testGeneration(functionCode: string): string {
-    return `Generate unit tests for this function...`;
+
+  static testGeneration(fn: string) {
+    return `
+Write Jest tests for this function:
+
+\`\`\`ts
+${fn}
+\`\`\`
+    `;
   }
-  
-  static errorFix(code: string, error: string): string {
-    return `Fix this error in the code...`;
+
+  static errorFix(code: string, error: string) {
+    return `
+Fix the following error:
+
+CODE:
+\`\`\`ts
+${code}
+\`\`\`
+
+ERROR:
+${error}
+
+Return JSON:
+{
+  "fixedCode": "...",
+  "confidence": 0-100
+}
+    `;
   }
 }
-
-
