@@ -66,6 +66,60 @@ ${functionCode}
     `.trim();
   }
   
+  static batchProcess(files: Map<string, string>, context: GeminiContext): string {
+    const fileList = Array.from(files.entries()).map(([name, content]) => `
+--- FILE: ${name} ---
+${content}
+---------------------
+`).join("\n");
+
+    const commitsStr = context.recentCommits.length > 0
+      ? context.recentCommits.join("\n- ")
+      : "None";
+
+    return `
+You are an expert AI coding assistant. Perform a deep, batched analysis on the following files.
+
+CONTEXT:
+- Recent Git Commits:
+- ${commitsStr}
+- Git Diff Summary:
+${context.gitDiffSummary}
+
+FILES TO PROCESS:
+${fileList}
+
+INSTRUCTIONS:
+For EACH file provided above, perform the following:
+1.  **Analyze**: Find bugs, logic errors, and code smells.
+2.  **Generate Tests**: Create a comprehensive unit test suite (Vitest) for the file.
+3.  **Suggest Fixes**: For any "error" or "high" severity issue found, provide a corrected code snippet.
+
+Respond in valid JSON format ONLY with this structure:
+{
+  "globalSummary": "Overview of the changes and health of these files",
+  "files": [
+    {
+      "file": "filename",
+      "analysis": {
+        "issues": [ { "line": number, "severity": "error"|"warning"|"info", "message": "string" } ],
+        "suggestions": ["string"],
+        "risk_level": "low"|"medium"|"high",
+        "summary": "File specific summary"
+      },
+      "generatedTests": "string (full test file content)",
+      "suggestedFixes": [
+        {
+          "issueId": "issue-index (0, 1, etc)",
+          "fix": { "fixedCode": "string", "confidence": number, "explanation": "string" }
+        }
+      ]
+    }
+  ]
+}
+    `.trim();
+  }
+  
   static errorFix(code: string, error: string): string {
     return `
 Fix the following error in the code. Return ONLY the fixed code block without markdown formatting if possible, or inside a single code block.
