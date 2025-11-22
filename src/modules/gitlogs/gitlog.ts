@@ -1,4 +1,4 @@
-import gitlog from "gitlog"; // Default import, not named import
+import { gitlogPromise } from "gitlog";
 import * as vscode from "vscode";
 
 export async function getLogsWithGitlog(): Promise<any[]> {
@@ -8,7 +8,7 @@ export async function getLogsWithGitlog(): Promise<any[]> {
     throw new Error("No workspace folder found");
   }
 
-  const commits = await gitlog({
+  const commits = await gitlogPromise({
     repo: workspaceFolder,
     number: 10,
     fields: ["hash", "authorName", "authorDate", "subject"],
