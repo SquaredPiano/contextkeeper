@@ -99,6 +99,11 @@
         "command": "contextkeeper.showStoredActions",
         "title": "ContextKeeper: Show Stored Actions (Vector Search)",
         "category": "ContextKeeper"
+      },
+      {
+        "command": "contextkeeper.testPipeline",
+        "title": "ContextKeeper: Test Autonomous Pipeline",
+        "category": "ContextKeeper"
       }
     ],
     "configuration": {

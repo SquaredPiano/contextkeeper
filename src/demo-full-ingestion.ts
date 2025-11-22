@@ -225,21 +225,18 @@ async function demoFullIngestion() {
              includePattern.test(filePath);
     }
 
-    function findSampleFile(dir: string, baseDir: string = dir): void {
-      if (sampleFile) return; // Already found one
-      
+    function findSampleFile(dir: string, baseDir: string = dir): { filePath: string; content: string } | null {
       try {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         
         for (const entry of entries) {
-          if (sampleFile) return;
-          
           const fullPath = path.join(dir, entry.name);
           const relativePath = path.relative(baseDir, fullPath);
 
           if (entry.isDirectory()) {
             if (!shouldIncludeFile(relativePath)) continue;
-            findSampleFile(fullPath, baseDir);
+            const found = findSampleFile(fullPath, baseDir);
+            if (found) return found;
           } else if (entry.isFile() && shouldIncludeFile(relativePath)) {
             try {
               const stats = fs.statSync(fullPath);
@@ -247,8 +244,7 @@ async function demoFullIngestion() {
               
               const content = fs.readFileSync(fullPath, 'utf-8');
               if (content.length > 100 && content.length < 5000) {
-                sampleFile = { filePath: relativePath, content };
-                return;
+                return { filePath: relativePath, content };
               }
             } catch (err) {
               // Skip
@@ -258,9 +254,13 @@ async function demoFullIngestion() {
       } catch (err) {
         // Ignore
       }
+      return null;
     }
 
-    findSampleFile(workspaceRoot);
+    const foundFile = findSampleFile(workspaceRoot);
+    if (foundFile) {
+      sampleFile = foundFile;
+    }
 
     if (sampleFile) {
       log('📄', `Found sample file to analyze: ${sampleFile.filePath}`, colors.green);

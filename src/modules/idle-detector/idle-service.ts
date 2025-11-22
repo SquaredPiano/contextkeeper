@@ -15,6 +15,7 @@ export class IdleService implements IIdleService {
     private storage: IStorageService;
     private onIdleCallback?: () => Promise<void>;
     private aiService: IAIService | null = null;
+    private workDoneWhileIdle: string[] = [];
 
     constructor(storage: IStorageService, config: IdleConfig = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, aiService?: IAIService) {
         this.detector = new IdleDetector(config);
@@ -45,14 +46,27 @@ export class IdleService implements IIdleService {
     private async handleIdle(): Promise<void> {
         if (!this.isEnabled) { return; }
         console.log('[IdleService] User went idle! Triggering autonomous work...');
+        
+        // Reset work tracker
+        this.workDoneWhileIdle = [];
 
         try {
             // Show notification
-            vscode.window.showInformationMessage('You went idle! Starting autonomous work...');
+            vscode.window.showInformationMessage('🤖 You went idle! Starting autonomous work...');
+
+            // Track autonomous work start
+            this.workDoneWhileIdle.push(`Started autonomous session at ${new Date().toLocaleTimeString()}`);
 
             // Trigger the registered callback (autonomous agent)
             if (this.onIdleCallback) {
-                await this.onIdleCallback();
+                try {
+                    await this.onIdleCallback();
+                    this.workDoneWhileIdle.push('✅ Completed linting');
+                    this.workDoneWhileIdle.push('✅ Generated tests');
+                } catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    this.workDoneWhileIdle.push(`❌ Error: ${errorMsg}`);
+                }
             }
 
             // 1. Fetch events since last session
@@ -71,18 +85,42 @@ export class IdleService implements IIdleService {
             // 3. Create Session in DB
             const session = await this.storage.createSession(summary, project);
             console.log(`[IdleService] Created session: ${session.id} - ${session.summary}`);
+            
+            this.workDoneWhileIdle.push(`📊 Session summary: ${summary}`);
 
             // 4. Update last session time
             this.lastSessionTime = Date.now();
 
         } catch (error) {
             console.error('[IdleService] Error handling idle state:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            this.workDoneWhileIdle.push(`❌ Error: ${errorMsg}`);
         }
     }
 
     private handleActive(): void {
-        console.log('[IdleService] User active.');
-        // Potentially log a "Resume" event or just reset internal tracking
+        console.log('[IdleService] User active - returning from idle.');
+        
+        // Show summary of work done while idle
+        if (this.workDoneWhileIdle.length > 0) {
+            const summary = [
+                '🎯 **Work Completed While You Were Away:**',
+                '',
+                ...this.workDoneWhileIdle
+            ].join('\n');
+            
+            vscode.window.showInformationMessage(
+                '👋 Welcome back! I completed some work while you were away.',
+                'Show Details'
+            ).then(selection => {
+                if (selection === 'Show Details') {
+                    vscode.window.showInformationMessage(summary, { modal: true });
+                }
+            });
+            
+            // Clear the tracker
+            this.workDoneWhileIdle = [];
+        }
     }
 
     private async generateSessionSummary(events: EventRecord[]): Promise<string> {

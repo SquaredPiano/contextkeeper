@@ -238,8 +238,8 @@ export class ContextIngestionService {
         if (affectedFunctions.size === 0) {
           console.log(`[ContextIngestion] No function context found for edit at line ${changes[0]?.range.start.line}`);
         }
-      } catch (e) {
-        console.warn('[ContextIngestion] Symbol detection failed:', e);
+      } catch {
+        console.warn('[ContextIngestion] Symbol detection failed');
       }
 
       const affectedFunctionsList = Array.from(affectedFunctions);
@@ -263,7 +263,7 @@ export class ContextIngestionService {
             const afterEnd = Math.min(lineCount - 1, endLine + 3);
             contextAfter = document.getText(new vscode.Range(endLine + 1, 0, afterEnd + 1, 0));
           }
-        } catch (e) {
+        } catch {
           // Ignore context extraction errors
         }
 

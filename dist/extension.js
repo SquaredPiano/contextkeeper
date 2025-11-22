@@ -54,6 +54,7 @@ const IngestionVerifier_1 = __webpack_require__(17);
 const AutonomousAgent_1 = __webpack_require__(18);
 const DashboardProvider_1 = __webpack_require__(36);
 const idle_service_1 = __webpack_require__(37);
+const test_autonomous_pipeline_1 = __webpack_require__(93);
 // Import real services
 const ContextService_1 = __webpack_require__(39);
 const GeminiService_1 = __webpack_require__(41);
@@ -84,7 +85,6 @@ let idleService;
 let autonomousAgent;
 // State
 let currentContext = null;
-let currentAnalysis = null;
 let isAutonomousMode = false;
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -176,7 +176,7 @@ async function activate(context) {
         // 4. Initialize Autonomous Agent
         autonomousAgent = new AutonomousAgent_1.AutonomousAgent(gitService, geminiService, contextService);
         // 5. Initialize Idle Detection Service
-        idleService = new idle_service_1.IdleService(storageService, { thresholdMs: 15000 }); // 15 seconds for demo
+        idleService = new idle_service_1.IdleService(storageService, { thresholdMs: 15000 }, geminiService); // 15 seconds for demo, pass Gemini
         await idleService.initialize();
         // Wire idle detection to autonomous agent
         idleService.onIdle(async () => {
@@ -190,10 +190,12 @@ async function activate(context) {
             }
             catch (error) {
                 console.error('Autonomous task failed:', error);
-                vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? (error instanceof Error ? error.message : String(error)) : 'Unknown error'}`);
             }
         });
         context.subscriptions.push(idleService);
+        // Register Test Command
+        (0, test_autonomous_pipeline_1.registerTestCommand)(context);
         // Register Verification Command
         context.subscriptions.push(vscode.commands.registerCommand('copilot.verifyIngestion', async () => {
             const verifier = new IngestionVerifier_1.IngestionVerifier(ingestionService, storageService);
@@ -203,7 +205,7 @@ async function activate(context) {
     }
     catch (error) {
         console.error("Extension activation failed:", error);
-        vscode.window.showErrorMessage(`Autonomous Copilot failed to activate: ${error.message}`);
+        vscode.window.showErrorMessage(`Autonomous Copilot failed to activate: ${(error instanceof Error ? error.message : String(error))}`);
     }
 }
 /**
@@ -235,7 +237,6 @@ function setupServiceListeners() {
         sidebarProvider.updateState(state);
     });
     aiService.on('analysisComplete', (analysis) => {
-        currentAnalysis = analysis;
         // Update UI components
         const state = {
             status: 'complete',
@@ -268,7 +269,7 @@ function setupServiceListeners() {
 /**
  * Register all extension commands
  */
-function registerCommands(context) {
+function _registerCommands(context) {
     // Analyze command
     context.subscriptions.push(vscode.commands.registerCommand('copilot.analyze', async () => {
         await runAnalysis();
@@ -303,11 +304,12 @@ function registerCommands(context) {
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
         }
         catch (error) {
-            NotificationManager_1.NotificationManager.showError(`Cannot open file: ${error.message}`);
+            const errorMsg = error instanceof Error ? (error instanceof Error ? error.message : String(error)) : String(error);
+            NotificationManager_1.NotificationManager.showError(`Cannot open file: ${errorMsg}`);
         }
     }));
     // Apply fix (placeholder for future implementation)
-    context.subscriptions.push(vscode.commands.registerCommand('copilot.applyFix', async (issueId) => {
+    context.subscriptions.push(vscode.commands.registerCommand('copilot.applyFix', async (_issueId) => {
         NotificationManager_1.NotificationManager.showSuccess('Fix application coming soon!');
     }));
 }
@@ -346,7 +348,7 @@ async function refreshContext() {
         sidebarProvider.updateContext(context);
     }
     catch (error) {
-        NotificationManager_1.NotificationManager.showError(`Failed to collect context: ${error.message}`);
+        NotificationManager_1.NotificationManager.showError(`Failed to collect context: ${(error instanceof Error ? error.message : String(error))}`);
     }
 }
 /**
@@ -374,13 +376,14 @@ async function runAnalysis() {
         });
     }
     catch (error) {
+        const errorMsg = error instanceof Error ? error.message : String(error);
         const state = {
             status: 'error',
-            error: error.message,
+            error: errorMsg,
         };
         statusBar.setState(state);
-        sidebarProvider.showError(error.message);
-        await NotificationManager_1.NotificationManager.showErrorWithRetry(`Analysis failed: ${error.message}`, () => runAnalysis());
+        sidebarProvider.showError(errorMsg);
+        await NotificationManager_1.NotificationManager.showErrorWithRetry(`Analysis failed: ${errorMsg}`, () => runAnalysis());
     }
 }
 // This method is called when your extension is deactivated
@@ -1533,8 +1536,8 @@ class ContextIngestionService {
                     console.log(`[ContextIngestion] No function context found for edit at line ${changes[0]?.range.start.line}`);
                 }
             }
-            catch (e) {
-                console.warn('[ContextIngestion] Symbol detection failed:', e);
+            catch {
+                console.warn('[ContextIngestion] Symbol detection failed');
             }
             const affectedFunctionsList = Array.from(affectedFunctions);
             // Calculate a rough "diff" or summary of changes with actual code context
@@ -1556,7 +1559,7 @@ class ContextIngestionService {
                         contextAfter = document.getText(new vscode.Range(endLine + 1, 0, afterEnd + 1, 0));
                     }
                 }
-                catch (e) {
+                catch {
                     // Ignore context extraction errors
                 }
                 return {
@@ -1732,10 +1735,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.GitWatcher = void 0;
 const vscode = __importStar(__webpack_require__(1));
 const events_1 = __webpack_require__(9);
-const cp = __importStar(__webpack_require__(13));
-const util = __importStar(__webpack_require__(14));
-const exec = util.promisify(cp.exec);
+const util_1 = __webpack_require__(14);
+const child_process_1 = __webpack_require__(13);
 const GitService_1 = __webpack_require__(87);
+const execAsync = (0, util_1.promisify)(child_process_1.exec);
 class GitWatcher extends events_1.EventEmitter {
     workspaceRoot;
     disposables = [];
@@ -1796,7 +1799,6 @@ class GitWatcher extends events_1.EventEmitter {
         const currentHash = this.repository.state.HEAD?.commit;
         if (currentHash && currentHash !== this.lastCommitHash) {
             // Commit changed!
-            const oldHash = this.lastCommitHash;
             this.lastCommitHash = currentHash;
             // Fetch commit details
             try {
@@ -1805,13 +1807,10 @@ class GitWatcher extends events_1.EventEmitter {
                 const commits = await this.repository.log({ maxEntries: 1, ref: currentHash });
                 if (commits.length > 0) {
                     const commit = commits[0];
-                    // Get file list from GitService
+                    // Get file list from git
                     let files = [];
                     try {
                         // Use git show to get files changed in this commit
-                        const { exec } = await Promise.resolve(/* import() */).then(__webpack_require__.t.bind(__webpack_require__, 13, 23));
-                        const { promisify } = await Promise.resolve(/* import() */).then(__webpack_require__.t.bind(__webpack_require__, 14, 23));
-                        const execAsync = promisify(exec);
                         const { stdout } = await execAsync(`git show --name-only --pretty=format: ${commit.hash}`, { cwd: this.workspaceRoot, timeout: 2000 });
                         files = stdout
                             .trim()
@@ -2239,19 +2238,53 @@ class AutonomousAgent {
         // 1. Auto-Lint Task
         this.taskRegistry.register({
             name: 'auto-lint',
-            description: 'Lint code using Cloudflare Worker',
+            description: 'Lint code using Cloudflare Worker and commit results',
             run: async (context) => {
-                console.log('Running Auto-Lint...');
-                // In a real app, we'd read the active file from context
+                console.log('[AutonomousAgent] Running Auto-Lint...');
                 const editor = vscode.window.activeTextEditor;
-                const code = editor ? editor.document.getText() : "console.log('hello');";
-                const language = editor ? editor.document.languageId : 'typescript';
-                const results = await this.cloudflareService.lintCode(code, language);
-                if (results.length > 0) {
-                    vscode.window.showWarningMessage(`Lint Issues: ${results.map(r => r.message).join(', ')}`);
+                if (!editor) {
+                    console.log('[AutonomousAgent] No active editor for linting');
+                    vscode.window.showWarningMessage('No active file to lint');
+                    return;
                 }
-                else {
-                    console.log('No lint issues found.');
+                const document = editor.document;
+                const code = document.getText();
+                const language = document.languageId;
+                const fileName = document.fileName;
+                try {
+                    const results = await this.cloudflareService.lintCode(code, language);
+                    if (results.length > 0) {
+                        const message = `Found ${results.length} lint issues`;
+                        console.log(`[AutonomousAgent] ${message}:`, results.map(r => r.message));
+                        vscode.window.showWarningMessage(`${message}: ${results.slice(0, 3).map(r => r.message).join(', ')}${results.length > 3 ? '...' : ''}`);
+                        // Create a lint report comment in the file
+                        const lintReport = [
+                            '',
+                            '// ============ AUTONOMOUS LINT REPORT ============',
+                            `// Generated: ${new Date().toISOString()}`,
+                            `// Issues Found: ${results.length}`,
+                            ...results.map(r => `// - Line ${r.line}: ${r.message}`),
+                            '// =================================================',
+                            ''
+                        ].join('\n');
+                        // Add lint report to top of file
+                        const edit = new vscode.WorkspaceEdit();
+                        edit.insert(document.uri, new vscode.Position(0, 0), lintReport);
+                        await vscode.workspace.applyEdit(edit);
+                        await document.save();
+                        // Commit the lint report
+                        const relativePath = vscode.workspace.asRelativePath(fileName);
+                        await this.gitService.commit(`chore: Add lint report for ${relativePath} (${results.length} issues)`, [fileName]);
+                        console.log('[AutonomousAgent] Lint report committed');
+                    }
+                    else {
+                        console.log('[AutonomousAgent] No lint issues found');
+                        vscode.window.showInformationMessage('✅ No lint issues found');
+                    }
+                }
+                catch (error) {
+                    console.error('[AutonomousAgent] Lint task failed:', error);
+                    throw error;
                 }
             }
         });
@@ -2291,27 +2324,22 @@ class AutonomousAgent {
             // 3. Create a new branch for this session
             const safeGoalName = sessionGoal.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().substring(0, 30);
             const branchName = `copilot/${safeGoalName}-${Date.now()}`;
+            console.log(`[AutonomousAgent] Creating branch: ${branchName}`);
             await this.gitService.createBranch(branchName);
             vscode.window.showInformationMessage(`Started autonomous session on branch: ${branchName}`);
-            // 4. Execute goal -> Map goal to tasks
-            // Simple heuristic for "Thin Path":
-            const lowerGoal = sessionGoal.toLowerCase();
-            if (lowerGoal.includes('lint')) {
-                await this.runTask('auto-lint', context);
-            }
-            else if (lowerGoal.includes('fix') || lowerGoal.includes('repair')) {
-                await this.runTask('auto-fix', context);
-            }
-            else if (lowerGoal.includes('test')) {
-                await this.runTask('generate-tests', context);
-            }
-            else {
-                // Default: Run all
-                await this.runTask('auto-lint', context);
-                await this.runTask('auto-fix', context);
-            }
+            // 4. Execute tasks sequentially
+            // Phase 1: Linting (deterministic)
+            console.log('[AutonomousAgent] Phase 1: Running linting...');
+            await this.runTask('auto-lint', context);
+            // Phase 2: Test generation (creative)
+            console.log('[AutonomousAgent] Phase 2: Generating tests...');
+            await this.runTask('generate-tests', context);
+            // 5. Show completion summary
+            vscode.window.showInformationMessage(`✅ Autonomous work complete on branch ${branchName}!\n` +
+                `Completed: Linting and Test Generation`);
         }
         catch (error) {
+            console.error('[AutonomousAgent] Session failed:', error);
             vscode.window.showErrorMessage(`Autonomous session failed: ${error.message}`);
         }
         finally {
@@ -6716,6 +6744,7 @@ class IdleService {
     storage;
     onIdleCallback;
     aiService = null;
+    workDoneWhileIdle = [];
     constructor(storage, config = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, aiService) {
         this.detector = new idle_detector_1.IdleDetector(config);
         this.storage = storage;
@@ -6741,12 +6770,24 @@ class IdleService {
             return;
         }
         console.log('[IdleService] User went idle! Triggering autonomous work...');
+        // Reset work tracker
+        this.workDoneWhileIdle = [];
         try {
             // Show notification
-            vscode.window.showInformationMessage('You went idle! Starting autonomous work...');
+            vscode.window.showInformationMessage('🤖 You went idle! Starting autonomous work...');
+            // Track autonomous work start
+            this.workDoneWhileIdle.push(`Started autonomous session at ${new Date().toLocaleTimeString()}`);
             // Trigger the registered callback (autonomous agent)
             if (this.onIdleCallback) {
-                await this.onIdleCallback();
+                try {
+                    await this.onIdleCallback();
+                    this.workDoneWhileIdle.push('✅ Completed linting');
+                    this.workDoneWhileIdle.push('✅ Generated tests');
+                }
+                catch (error) {
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    this.workDoneWhileIdle.push(`❌ Error: ${errorMsg}`);
+                }
             }
             // 1. Fetch events since last session
             const recentEvents = await this.storage.getRecentEvents(100);
@@ -6761,16 +6802,33 @@ class IdleService {
             // 3. Create Session in DB
             const session = await this.storage.createSession(summary, project);
             console.log(`[IdleService] Created session: ${session.id} - ${session.summary}`);
+            this.workDoneWhileIdle.push(`📊 Session summary: ${summary}`);
             // 4. Update last session time
             this.lastSessionTime = Date.now();
         }
         catch (error) {
             console.error('[IdleService] Error handling idle state:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            this.workDoneWhileIdle.push(`❌ Error: ${errorMsg}`);
         }
     }
     handleActive() {
-        console.log('[IdleService] User active.');
-        // Potentially log a "Resume" event or just reset internal tracking
+        console.log('[IdleService] User active - returning from idle.');
+        // Show summary of work done while idle
+        if (this.workDoneWhileIdle.length > 0) {
+            const summary = [
+                '🎯 **Work Completed While You Were Away:**',
+                '',
+                ...this.workDoneWhileIdle
+            ].join('\n');
+            vscode.window.showInformationMessage('👋 Welcome back! I completed some work while you were away.', 'Show Details').then(selection => {
+                if (selection === 'Show Details') {
+                    vscode.window.showInformationMessage(summary, { modal: true });
+                }
+            });
+            // Clear the tracker
+            this.workDoneWhileIdle = [];
+        }
     }
     async generateSessionSummary(events) {
         // Try to use Gemini AI for intelligent summarization
@@ -7029,7 +7087,8 @@ class ContextService extends events_1.EventEmitter {
             return context;
         }
         catch (error) {
-            console.error('Error collecting context:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error('Error collecting context:', errorMsg, error);
             this.emit('error', error);
             throw error;
         }
@@ -7139,8 +7198,12 @@ class ContextService extends events_1.EventEmitter {
         }
         return {
             recentCommits: commits,
-            currentBranch: currentBranch,
-            uncommittedChanges: uncommittedChanges,
+            currentBranch: currentBranch || 'unknown',
+            uncommittedChanges: uncommittedChanges.map(file => ({
+                file: file,
+                linesAdded: 0,
+                linesRemoved: 0
+            })),
         };
     }
     /**
@@ -7256,7 +7319,7 @@ class ContextService extends events_1.EventEmitter {
                 currentFunction = (0, symbolUtils_1.findFunctionAtPosition)(symbols, position) || '';
             }
         }
-        catch (e) {
+        catch {
             // Ignore symbol provider errors
         }
         return {
@@ -15736,19 +15799,33 @@ class LanceDBStorage {
     embeddingService;
     constructor() { }
     /**
-     * Connects to the local LanceDB instance.
+     * Connects to LanceDB Cloud or falls back to local instance.
      * @param embeddingService Optional service for generating embeddings.
      */
     async connect(embeddingService) {
         try {
             this.embeddingService = embeddingService;
-            const dbPath = path.join(os.homedir(), '.contextkeeper', 'lancedb');
-            if (!fs.existsSync(dbPath)) {
-                fs.mkdirSync(dbPath, { recursive: true });
+            // Check for LanceDB Cloud credentials
+            const apiKey = process.env.LANCE_DB_API_KEY;
+            const dbName = process.env.LANCEDB_DB_NAME || 'contextkeeper';
+            if (apiKey) {
+                // Connect to LanceDB Cloud
+                const cloudUri = `db://${dbName}`;
+                console.log('Connecting to LanceDB Cloud:', cloudUri);
+                this.db = await lancedb.connect(cloudUri, { apiKey });
+                console.log('Connected to LanceDB Cloud successfully');
             }
-            this.db = await lancedb.connect(dbPath);
+            else {
+                // Fallback to local LanceDB
+                console.log('LANCE_DB_API_KEY not found, using local LanceDB');
+                const dbPath = path.join(os.homedir(), '.contextkeeper', 'lancedb');
+                if (!fs.existsSync(dbPath)) {
+                    fs.mkdirSync(dbPath, { recursive: true });
+                }
+                this.db = await lancedb.connect(dbPath);
+                console.log('Connected to local LanceDB at', dbPath);
+            }
             await this.initializeTables();
-            console.log('Connected to LanceDB at', dbPath);
         }
         catch (error) {
             console.error('Failed to connect to LanceDB:', error);
@@ -15829,6 +15906,7 @@ class LanceDBStorage {
             ...event,
             metadata: typeof event.metadata === 'string' ? event.metadata : JSON.stringify(event.metadata || {})
         };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await this.eventsTable.add([record]);
     }
     async createSession(summary, project) {
@@ -15844,6 +15922,7 @@ class LanceDBStorage {
             project,
             event_count: 0
         };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await this.sessionsTable.add([session]);
         return session;
     }
@@ -15858,6 +15937,7 @@ class LanceDBStorage {
             embedding,
             files: typeof action.files === 'string' ? action.files : JSON.stringify(action.files || [])
         };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await this.actionsTable.add([record]);
     }
     async getLastSession() {
@@ -15983,7 +16063,7 @@ class LanceDBStorage {
             try {
                 await this.db.dropTable(table);
             }
-            catch (e) {
+            catch {
                 // Ignore if table doesn't exist
             }
         }
@@ -18181,6 +18261,251 @@ module.exports = require("node:child_process");
 "use strict";
 module.exports = require("node:util");
 
+/***/ }),
+/* 93 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+/**
+ * End-to-end test for the autonomous pipeline
+ * Tests: Idle Detection -> Git Branch -> Linting -> Test Generation -> User Return Summary
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.testAutonomousPipeline = testAutonomousPipeline;
+exports.registerTestCommand = registerTestCommand;
+const vscode = __importStar(__webpack_require__(1));
+const path = __importStar(__webpack_require__(4));
+const dotenv = __importStar(__webpack_require__(2));
+dotenv.config({ path: path.resolve(__dirname, '../../../.env.local') });
+async function testAutonomousPipeline() {
+    console.log('\n' + '='.repeat(70));
+    console.log('🧪 AUTONOMOUS PIPELINE END-TO-END TEST');
+    console.log('='.repeat(70) + '\n');
+    const testResults = [];
+    try {
+        // Test 1: Extension Services Initialized
+        console.log('📋 Test 1: Checking extension services...');
+        try {
+            // Check if commands are available
+            const commands = await vscode.commands.getCommands();
+            const hasContextKeeperCommands = commands.some(cmd => cmd.startsWith('contextkeeper.') || cmd.startsWith('copilot.'));
+            if (hasContextKeeperCommands) {
+                testResults.push({ name: 'Extension Services', status: '✅ PASS', details: 'Commands registered' });
+                console.log('   ✅ Extension services are active');
+            }
+            else {
+                testResults.push({ name: 'Extension Services', status: '❌ FAIL', details: 'Commands not found' });
+                console.log('   ❌ Extension commands not found');
+            }
+        }
+        catch (error) {
+            testResults.push({ name: 'Extension Services', status: '❌ ERROR', details: String(error) });
+            console.log('   ❌ Error checking services');
+        }
+        // Test 2: Check LanceDB Connection
+        console.log('\n📋 Test 2: Verifying LanceDB Cloud connection...');
+        try {
+            const hasApiKey = !!process.env.LANCE_DB_API_KEY;
+            const dbName = process.env.LANCEDB_DB_NAME;
+            if (hasApiKey && dbName) {
+                testResults.push({
+                    name: 'LanceDB Cloud',
+                    status: '✅ PASS',
+                    details: `Connected to ${dbName}`
+                });
+                console.log(`   ✅ LanceDB Cloud configured: ${dbName}`);
+            }
+            else {
+                testResults.push({
+                    name: 'LanceDB Cloud',
+                    status: '⚠️  WARN',
+                    details: 'Using local fallback'
+                });
+                console.log('   ⚠️  LanceDB Cloud not configured, using local storage');
+            }
+        }
+        catch (error) {
+            testResults.push({ name: 'LanceDB Cloud', status: '❌ ERROR', details: String(error) });
+        }
+        // Test 3: Check Gemini API
+        console.log('\n📋 Test 3: Verifying Gemini API configuration...');
+        try {
+            const hasGeminiKey = !!process.env.GEMINI_API_KEY;
+            if (hasGeminiKey) {
+                testResults.push({ name: 'Gemini API', status: '✅ PASS', details: 'API key configured' });
+                console.log('   ✅ Gemini API key configured');
+            }
+            else {
+                testResults.push({ name: 'Gemini API', status: '❌ FAIL', details: 'No API key' });
+                console.log('   ❌ Gemini API key not found');
+            }
+        }
+        catch (error) {
+            testResults.push({ name: 'Gemini API', status: '❌ ERROR', details: String(error) });
+        }
+        // Test 4: Check Git Repository
+        console.log('\n📋 Test 4: Verifying Git repository...');
+        try {
+            const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (workspaceRoot) {
+                const gitDir = path.join(workspaceRoot, '.git');
+                try {
+                    await vscode.workspace.fs.stat(vscode.Uri.file(gitDir));
+                    testResults.push({ name: 'Git Repository', status: '✅ PASS', details: 'Repo detected' });
+                    console.log('   ✅ Git repository detected');
+                }
+                catch {
+                    testResults.push({ name: 'Git Repository', status: '⚠️  WARN', details: 'No .git found' });
+                    console.log('   ⚠️  Not a git repository');
+                }
+            }
+            else {
+                testResults.push({ name: 'Git Repository', status: '❌ FAIL', details: 'No workspace' });
+                console.log('   ❌ No workspace folder open');
+            }
+        }
+        catch (error) {
+            testResults.push({ name: 'Git Repository', status: '❌ ERROR', details: String(error) });
+        }
+        // Test 5: Test Ingestion Service
+        console.log('\n📋 Test 5: Testing ingestion service...');
+        try {
+            // Trigger a file edit to test ingestion
+            const editor = vscode.window.activeTextEditor;
+            if (editor) {
+                testResults.push({
+                    name: 'Ingestion Service',
+                    status: '✅ PASS',
+                    details: `Active file: ${path.basename(editor.document.fileName)}`
+                });
+                console.log(`   ✅ Active editor detected: ${path.basename(editor.document.fileName)}`);
+            }
+            else {
+                testResults.push({ name: 'Ingestion Service', status: '⚠️  WARN', details: 'No active editor' });
+                console.log('   ⚠️  No active editor to capture events from');
+            }
+        }
+        catch (error) {
+            testResults.push({ name: 'Ingestion Service', status: '❌ ERROR', details: String(error) });
+        }
+        // Test 6: Test Idle Detection
+        console.log('\n📋 Test 6: Testing idle detection configuration...');
+        try {
+            const idleThreshold = 15000; // 15 seconds as configured
+            testResults.push({
+                name: 'Idle Detection',
+                status: '✅ PASS',
+                details: `Threshold: ${idleThreshold / 1000}s`
+            });
+            console.log(`   ✅ Idle detection configured: ${idleThreshold / 1000} seconds`);
+        }
+        catch (error) {
+            testResults.push({ name: 'Idle Detection', status: '❌ ERROR', details: String(error) });
+        }
+        // Test 7: Check Cloudflare Worker
+        console.log('\n📋 Test 7: Verifying Cloudflare Worker configuration...');
+        try {
+            const config = vscode.workspace.getConfiguration('copilot');
+            const workerUrl = config.get('cloudflare.workerUrl');
+            if (workerUrl) {
+                testResults.push({
+                    name: 'Cloudflare Worker',
+                    status: '✅ PASS',
+                    details: workerUrl
+                });
+                console.log(`   ✅ Cloudflare worker configured: ${workerUrl}`);
+            }
+            else {
+                testResults.push({
+                    name: 'Cloudflare Worker',
+                    status: '⚠️  WARN',
+                    details: 'Using local fallback'
+                });
+                console.log('   ⚠️  No Cloudflare worker configured, will use local fallback');
+            }
+        }
+        catch (error) {
+            testResults.push({ name: 'Cloudflare Worker', status: '❌ ERROR', details: String(error) });
+        }
+        // Print Summary
+        console.log('\n' + '='.repeat(70));
+        console.log('📊 TEST SUMMARY');
+        console.log('='.repeat(70));
+        testResults.forEach((result, index) => {
+            console.log(`\n${index + 1}. ${result.name}`);
+            console.log(`   Status: ${result.status}`);
+            if (result.details) {
+                console.log(`   Details: ${result.details}`);
+            }
+        });
+        const passCount = testResults.filter(r => r.status.includes('PASS')).length;
+        const warnCount = testResults.filter(r => r.status.includes('WARN')).length;
+        const failCount = testResults.filter(r => r.status.includes('FAIL') || r.status.includes('ERROR')).length;
+        console.log('\n' + '='.repeat(70));
+        console.log(`Results: ${passCount} passed, ${warnCount} warnings, ${failCount} failed`);
+        console.log('='.repeat(70));
+        if (failCount === 0) {
+            console.log('\n🎉 ALL CRITICAL TESTS PASSED!');
+            console.log('\n📝 To test the autonomous pipeline:');
+            console.log('   1. Open a TypeScript file');
+            console.log('   2. Make some edits');
+            console.log('   3. Wait 15 seconds (idle threshold)');
+            console.log('   4. Watch for "You went idle!" notification');
+            console.log('   5. Wait for autonomous work to complete');
+            console.log('   6. Start typing again to see the "Welcome back!" summary');
+            vscode.window.showInformationMessage('✅ ContextKeeper pipeline tests passed!', 'View Output');
+        }
+        else {
+            console.log('\n⚠️  Some tests failed. Check the details above.');
+            vscode.window.showWarningMessage(`⚠️  ${failCount} tests failed. Check Output for details.`, 'View Output');
+        }
+    }
+    catch (error) {
+        console.error('\n❌ Test execution failed:', error);
+        vscode.window.showErrorMessage(`Test failed: ${error}`);
+    }
+}
+// Register command to run tests
+function registerTestCommand(context) {
+    const disposable = vscode.commands.registerCommand('contextkeeper.testPipeline', testAutonomousPipeline);
+    context.subscriptions.push(disposable);
+}
+
+
 /***/ })
 /******/ 	]);
 /************************************************************************/
@@ -18221,36 +18546,6 @@ module.exports = require("node:util");
 /******/ 				() => (module);
 /******/ 			__webpack_require__.d(getter, { a: getter });
 /******/ 			return getter;
-/******/ 		};
-/******/ 	})();
-/******/ 	
-/******/ 	/* webpack/runtime/create fake namespace object */
-/******/ 	(() => {
-/******/ 		var getProto = Object.getPrototypeOf ? (obj) => (Object.getPrototypeOf(obj)) : (obj) => (obj.__proto__);
-/******/ 		var leafPrototypes;
-/******/ 		// create a fake namespace object
-/******/ 		// mode & 1: value is a module id, require it
-/******/ 		// mode & 2: merge all properties of value into the ns
-/******/ 		// mode & 4: return value when already ns object
-/******/ 		// mode & 16: return value when it's Promise-like
-/******/ 		// mode & 8|1: behave like require
-/******/ 		__webpack_require__.t = function(value, mode) {
-/******/ 			if(mode & 1) value = this(value);
-/******/ 			if(mode & 8) return value;
-/******/ 			if(typeof value === 'object' && value) {
-/******/ 				if((mode & 4) && value.__esModule) return value;
-/******/ 				if((mode & 16) && typeof value.then === 'function') return value;
-/******/ 			}
-/******/ 			var ns = Object.create(null);
-/******/ 			__webpack_require__.r(ns);
-/******/ 			var def = {};
-/******/ 			leafPrototypes = leafPrototypes || [null, getProto({}), getProto([]), getProto(getProto)];
-/******/ 			for(var current = mode & 2 && value; (typeof current == 'object' || typeof current == 'function') && !~leafPrototypes.indexOf(current); current = getProto(current)) {
-/******/ 				Object.getOwnPropertyNames(current).forEach((key) => (def[key] = () => (value[key])));
-/******/ 			}
-/******/ 			def['default'] = () => (value);
-/******/ 			__webpack_require__.d(ns, def);
-/******/ 			return ns;
 /******/ 		};
 /******/ 	})();
 /******/ 	

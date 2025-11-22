@@ -64,12 +64,16 @@ The system is architected around a **Hybrid Compute Model**, balancing local res
 - **Git Integration**: Watches git commits via `GitWatcher`
 
 ### 3.3. Storage Layer (`LanceDBStorage`)
+- **Two Modes**:
+  - **Cloud Mode**: Connects to LanceDB Cloud when `LANCE_DB_API_KEY` is present
+  - **Local Mode**: Falls back to `~/.contextkeeper/lancedb` for offline development
 - **Three Tables**:
   - `events`: Raw event log (timestamp, type, file, metadata)
   - `sessions`: Work session summaries with embeddings
   - `actions`: High-level actions with embeddings for RAG
 - **Embedding Generation**: Uses Gemini's `text-embedding-004` model (768-dim vectors)
 - **Vector Search**: LanceDB's native `vectorSearch()` for similarity queries
+- **Migration Tool**: `migrate-to-cloud.ts` syncs local data to cloud
 
 ### 3.4. Context Builder (`context-builder.ts`)
 - **RAG Integration**: Queries vector DB for relevant past sessions
@@ -85,9 +89,10 @@ The system is architected around a **Hybrid Compute Model**, balancing local res
 - **Task Registry**: Pluggable task system (auto-lint, auto-fix, generate-tests)
 - **Git Branch Isolation**: Creates timestamped `copilot/*` branches
 - **Sequential Execution**:
-  1. Cloudflare linting with automatic commit
-  2. Test generation with separate commit
-- **Error Handling**: Shows user-friendly error messages
+  1. **Phase 1**: Cloudflare linting with lint report generation and commit
+  2. **Phase 2**: Gemini test generation with automatic file creation and commit
+- **Error Handling**: Shows user-friendly error messages and tracks work progress
+- **Work Tracking**: Maintains list of completed tasks to show user on return
 
 ### 3.7. External Services
 - **CloudflareService**: Fast deterministic linting with local fallback
@@ -100,25 +105,29 @@ The system is architected around a **Hybrid Compute Model**, balancing local res
 
 ### ✅ Completed
 - [x] Async extension activation
+- [x] **LanceDB Cloud integration with local fallback**
+- [x] **Data migration from local to cloud storage**
 - [x] Storage initialization with embedding service
 - [x] Event ingestion with embeddings
 - [x] RAG-based context retrieval via ContextBuilder
-- [x] Idle detection service
+- [x] Idle detection service with AI-powered summaries
 - [x] Autonomous agent with branch isolation
+- [x] **Enhanced auto-lint task with commit tracking**
+- [x] **Improved test generation with automatic file creation**
 - [x] Cloudflare linting integration with fallback
+- [x] **Work summary on return from idle**
 - [x] Session management
 
 ### 🚧 In Progress
-- [ ] End-to-end testing of ingestion pipeline
-- [ ] Autonomous agent flow testing (idle -> lint -> test)
 - [ ] UI integration (sidebar showing work done)
-- [ ] ElevenLabs TTS integration
+- [ ] ElevenLabs TTS integration polish
 
 ### 📋 TODO
 - [ ] Optimize context window management
 - [ ] Add more autonomous tasks (refactoring, documentation)
 - [ ] Performance monitoring and optimization
 - [ ] Error recovery UI improvements
+- [ ] Test suite for autonomous workflows
 
 ---
 
@@ -148,6 +157,39 @@ The system is architected around a **Hybrid Compute Model**, balancing local res
   "copilot.autonomous.idleTimeout": 300
 }
 ```
+
+### Environment Variables (`.env.local`)
+```bash
+GEMINI_API_KEY=your-gemini-key
+LANCE_DB_API_KEY=your-lancedb-cloud-key
+LANCEDB_DB_NAME=your-database-name
+ELEVEN_LABS_API_KEY=your-elevenlabs-key
+CLOUDFLARE_API_KEY=your-cloudflare-key
+```
+
+---
+
+## 6. Recent Updates (November 22, 2025)
+
+### LanceDB Cloud Integration
+- **Migrated from local-only to cloud-first architecture**
+- Storage service now checks for `LANCE_DB_API_KEY` environment variable
+- Connects to `db://{LANCEDB_DB_NAME}` when API key is present
+- Falls back to local `~/.contextkeeper/lancedb` when offline
+- Created `migrate-to-cloud.ts` script to sync existing local data to cloud
+- **Successfully migrated 74 events, 15 actions, and 19 sessions to cloud**
+
+### Enhanced Autonomous Workflow
+- **Auto-Lint Task**: Now creates lint reports and commits them with detailed messages
+- **Test Generation**: Improved to handle file creation and commit tracking
+- **Work Tracking**: Idle service tracks all work done and presents summary on user return
+- **Better Error Handling**: All tasks catch errors and report them to user
+- **Sequential Execution**: Linting always runs before test generation
+
+### Verification & Testing
+- Created `verify-cloud-connection.ts` to test end-to-end cloud connectivity
+- Verified all features: event logging, embeddings, vector search, data retrieval
+- All tests passing ✅
 
 ---
 
