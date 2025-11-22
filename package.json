@@ -1,7 +1,7 @@
 {
   "name": "contextkeeper",
-  "displayName": "contextkeeper",
-  "description": "grabs context from what you were working on, and provides it back to you when you come back. It can also use this context to perform autonomous actions on a separate git branch.",
+  "displayName": "Autonomous Copilot",
+  "description": "AI-powered autonomous code analysis and improvements. Grabs context from your work and provides intelligent suggestions.",
   "version": "0.0.1",
   "engines": {
     "vscode": "^1.106.1"
@@ -9,9 +9,33 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "copilot-container",
+          "title": "Autonomous Copilot",
+          "icon": "$(robot)"
+        }
+      ]
+    },
+    "views": {
+      "copilot-container": [
+        {
+          "type": "webview",
+          "id": "copilot.mainView",
+          "name": "Dashboard"
+        },
+        {
+          "id": "copilot.issuesTree",
+          "name": "Issues Found"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "contextkeeper.helloWorld",
@@ -20,8 +44,83 @@
       {
         "command": "contextkeeper.testGitlog",
         "title": "ContextKeeper: Test Git Logs"
+      },
+      {
+        "command": "copilot.analyze",
+        "title": "Analyze Code",
+        "category": "Copilot",
+        "icon": "$(search)"
+      },
+      {
+        "command": "copilot.toggleAutonomous",
+        "title": "Toggle Autonomous Mode",
+        "category": "Copilot",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "copilot.showPanel",
+        "title": "Show Dashboard",
+        "category": "Copilot",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "copilot.refreshContext",
+        "title": "Refresh Context",
+        "category": "Copilot",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "copilot.navigateToIssue",
+        "title": "Go to Issue",
+        "category": "Copilot"
+      },
+      {
+        "command": "copilot.applyFix",
+        "title": "Apply Suggested Fix",
+        "category": "Copilot",
+        "icon": "$(wrench)"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Autonomous Copilot",
+      "properties": {
+        "copilot.autonomous.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable autonomous mode (runs automatically when idle)"
+        },
+        "copilot.autonomous.idleTimeout": {
+          "type": "number",
+          "default": 300,
+          "description": "Idle timeout in seconds before autonomous analysis (default: 5 minutes)"
+        },
+        "copilot.gemini.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Gemini API key for AI analysis"
+        },
+        "copilot.elevenlabs.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "ElevenLabs API key for voice notifications"
+        },
+        "copilot.cloudflare.workerUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Cloudflare Worker URL for backend processing"
+        },
+        "copilot.voice.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable voice notifications"
+        },
+        "copilot.analysis.autoRun": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run analysis on file save"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
