@@ -1,4 +1,5 @@
 import { VoiceType, ElevenLabsModule } from './index';
+import * as vscode from 'vscode';
 import { getVoiceId } from './voices';
 import { MockPlayer } from './mock';
 import { promises as fs } from 'fs';
@@ -77,7 +78,11 @@ export class ElevenLabsService implements ElevenLabsModule {
   }
 
   private async performSpeak(text: string, voice: VoiceType): Promise<void> {
-    if (this.fallbackMode || !this.apiKey) {
+    // Respect user preferences: global voice enabled + ElevenLabs-specific enabled
+    const globalVoice = vscode.workspace.getConfiguration('copilot').get('voice.enabled', true);
+    const elevenEnabled = vscode.workspace.getConfiguration('copilot').get('voice.elevenEnabled', true);
+
+    if (!globalVoice || !elevenEnabled || this.fallbackMode || !this.apiKey) {
       await this.mock.play(text, voice);
       return;
     }
