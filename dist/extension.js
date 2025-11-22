@@ -45,18 +45,18 @@ exports.deactivate = deactivate;
 // Import the module and reference it with the alias vscode in your code below
 const vscode = __importStar(__webpack_require__(1));
 const gitlog_1 = __webpack_require__(2);
-const fileWatcher_1 = __webpack_require__(28);
+const fileWatcher_1 = __webpack_require__(18);
 const LintingService_1 = __webpack_require__(32);
 // Import mock services (INTEGRATION POINT: Replace with real services here)
-const MockContextService_1 = __webpack_require__(18);
-const GeminiService_1 = __webpack_require__(20); // Real AI Service
-const MockGitService_1 = __webpack_require__(21);
-const MockVoiceService_1 = __webpack_require__(22);
+const MockContextService_1 = __webpack_require__(19);
+const GeminiService_1 = __webpack_require__(21); // Real AI Service
+const MockGitService_1 = __webpack_require__(25);
+const MockVoiceService_1 = __webpack_require__(26);
 // Import UI components
-const StatusBarManager_1 = __webpack_require__(23);
-const SidebarWebviewProvider_1 = __webpack_require__(24);
-const IssuesTreeProvider_1 = __webpack_require__(26);
-const NotificationManager_1 = __webpack_require__(27);
+const StatusBarManager_1 = __webpack_require__(27);
+const SidebarWebviewProvider_1 = __webpack_require__(28);
+const IssuesTreeProvider_1 = __webpack_require__(30);
+const NotificationManager_1 = __webpack_require__(31);
 // Global state
 let statusBar;
 let sidebarProvider;
@@ -1995,998 +1995,6 @@ module.exports = require("node:tty");
 
 /***/ }),
 /* 18 */
-/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
-
-"use strict";
-
-/**
- * Mock Context Service
- *
- * Provides fake developer context data for UI development.
- * INTEGRATION: Replace with real ContextService that uses vscode API.
- */
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MockContextService = void 0;
-const events_1 = __webpack_require__(19);
-class MockContextService extends events_1.EventEmitter {
-    mockContext;
-    constructor() {
-        super();
-        this.mockContext = this.generateMockContext();
-    }
-    async collectContext() {
-        // Simulate network delay
-        await this.delay(500);
-        // Update some fields to simulate real-time changes
-        this.mockContext.session.totalEdits += Math.floor(Math.random() * 5);
-        this.mockContext.files.activeFile = this.mockContext.files.openFiles[Math.floor(Math.random() * this.mockContext.files.openFiles.length)];
-        this.emit('contextCollected', this.mockContext);
-        return this.mockContext;
-    }
-    getCurrentFile() {
-        return this.mockContext.files.activeFile;
-    }
-    getRiskyFiles() {
-        return this.mockContext.session.riskyFiles;
-    }
-    generateMockContext() {
-        const now = new Date();
-        const oneHourAgo = new Date(now.getTime() - 3600000);
-        return {
-            git: {
-                recentCommits: [
-                    {
-                        hash: 'abc1234',
-                        message: 'feat: Add user authentication flow',
-                        author: 'You',
-                        date: new Date(now.getTime() - 7200000), // 2 hours ago
-                    },
-                    {
-                        hash: 'def5678',
-                        message: 'fix: Handle null reference in login',
-                        author: 'You',
-                        date: new Date(now.getTime() - 3600000), // 1 hour ago
-                    },
-                    {
-                        hash: '9ab0cde',
-                        message: 'refactor: Extract validation logic',
-                        author: 'Teammate',
-                        date: new Date(now.getTime() - 1800000), // 30 min ago
-                    },
-                ],
-                currentBranch: 'feature/autonomous-copilot',
-                uncommittedChanges: [
-                    { file: 'src/extension.ts', linesAdded: 47, linesRemoved: 12 },
-                    { file: 'src/services/mock/MockAIService.ts', linesAdded: 89, linesRemoved: 3 },
-                    { file: 'src/ui/StatusBarManager.ts', linesAdded: 25, linesRemoved: 0 },
-                ],
-            },
-            files: {
-                openFiles: [
-                    'src/extension.ts',
-                    'src/services/interfaces.ts',
-                    'src/services/mock/MockAIService.ts',
-                    'src/ui/StatusBarManager.ts',
-                    'README.md',
-                ],
-                activeFile: 'src/extension.ts',
-                recentlyEdited: [
-                    { file: 'src/extension.ts', timestamp: new Date(now.getTime() - 300000), changes: 15 },
-                    { file: 'src/services/mock/MockAIService.ts', timestamp: new Date(now.getTime() - 600000), changes: 23 },
-                    { file: 'src/ui/StatusBarManager.ts', timestamp: new Date(now.getTime() - 900000), changes: 8 },
-                ],
-                editFrequency: new Map([
-                    ['src/extension.ts', 27],
-                    ['src/services/interfaces.ts', 8],
-                    ['src/services/mock/MockAIService.ts', 15],
-                    ['src/ui/StatusBarManager.ts', 12],
-                    ['README.md', 3],
-                ]),
-            },
-            cursor: {
-                file: 'src/extension.ts',
-                line: 42,
-                column: 15,
-                currentFunction: 'activate',
-                selectedText: '',
-            },
-            timeline: {
-                edits: [
-                    { file: 'src/extension.ts', line: 42, timestamp: new Date(now.getTime() - 120000), chars: 25 },
-                    { file: 'src/extension.ts', line: 45, timestamp: new Date(now.getTime() - 180000), chars: 43 },
-                    { file: 'src/services/mock/MockAIService.ts', line: 67, timestamp: new Date(now.getTime() - 300000), chars: 18 },
-                ],
-                opens: [
-                    { file: 'src/extension.ts', timestamp: oneHourAgo },
-                    { file: 'src/services/interfaces.ts', timestamp: new Date(oneHourAgo.getTime() + 600000) },
-                ],
-                closes: [
-                    { file: 'package.json', timestamp: new Date(oneHourAgo.getTime() + 300000) },
-                ],
-            },
-            session: {
-                startTime: oneHourAgo,
-                totalEdits: 47,
-                riskyFiles: ['src/extension.ts', 'src/services/mock/MockAIService.ts'], // High edit frequency
-            },
-        };
-    }
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-}
-exports.MockContextService = MockContextService;
-
-
-/***/ }),
-/* 19 */
-/***/ ((module) => {
-
-"use strict";
-module.exports = require("events");
-
-/***/ }),
-/* 20 */
-/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.GeminiService = void 0;
-const gemini_client_1 = __webpack_require__(29);
-const context_builder_1 = __webpack_require__(31);
-const events_1 = __webpack_require__(19);
-class GeminiService extends events_1.EventEmitter {
-    client;
-    isInitialized = false;
-    batchCache = new Map();
-    constructor() {
-        super();
-        this.client = new gemini_client_1.GeminiClient();
-    }
-    async initialize(apiKey) {
-        await this.client.initialize(apiKey);
-        this.isInitialized = true;
-    }
-    /**
-     * Runs a batch analysis on the active file and potentially related files.
-     * This leverages the large context window to get analysis, tests, and fixes in one go.
-     */
-    async analyze(code, context) {
-        if (!this.isInitialized) {
-            const error = new Error("GeminiService not initialized. Please check your API key settings.");
-            this.emit('error', error);
-            throw error;
-        }
-        this.emit('analysisStarted');
-        try {
-            const geminiContext = context_builder_1.ContextBuilder.build({
-                gitLogs: context.git.recentCommits.map(c => `${c.hash.substring(0, 7)} - ${c.message}`),
-                gitDiff: "",
-                openFiles: context.files.openFiles,
-                activeFile: context.files.activeFile,
-                errors: [],
-                editHistory: context.files.recentlyEdited.map(e => ({
-                    file: e.file,
-                    timestamp: e.timestamp.getTime()
-                }))
-            });
-            // Prepare batch payload
-            const filesToAnalyze = new Map();
-            filesToAnalyze.set(context.files.activeFile, code);
-            // In a real scenario, we would read related files here and add them to the map
-            // For now, we focus on the active file but use the batch endpoint structure
-            this.emit('analysisProgress', 20, 'Sending batch context to Gemini...');
-            // Use runBatch instead of analyzeCode
-            const batchResult = await this.client.runBatch(filesToAnalyze, geminiContext);
-            // Cache the result for future use (e.g. generateTests calls)
-            this.batchCache.set(context.files.activeFile, batchResult);
-            this.emit('analysisProgress', 80, 'Processing batch results...');
-            // Extract analysis for the active file
-            const fileResult = batchResult.files.find(f => f.file === context.files.activeFile) || batchResult.files[0];
-            if (!fileResult) {
-                throw new Error("No analysis result found for active file");
-            }
-            const analysis = {
-                issues: fileResult.analysis.issues.map((i, idx) => ({
-                    id: `issue-${idx}`,
-                    file: context.files.activeFile,
-                    line: i.line,
-                    column: 0,
-                    severity: i.severity || 'warning',
-                    message: i.message
-                })),
-                suggestions: fileResult.analysis.suggestions.map(s => ({
-                    type: 'refactor',
-                    message: s
-                })),
-                riskLevel: fileResult.analysis.risk_level || 'low',
-                confidence: 0.9,
-                timestamp: new Date()
-            };
-            this.emit('analysisComplete', analysis);
-            return analysis;
-        }
-        catch (error) {
-            console.error("GeminiService Analysis Error:", error);
-            this.emit('error', error);
-            throw error;
-        }
-    }
-    async generateTests(code) {
-        if (!this.isInitialized) {
-            throw new Error("GeminiService not initialized");
-        }
-        // Check cache first
-        // Note: In a real app, we'd need a better cache key than just the file content or path
-        // For now, we assume the last analysis run populated the cache for the active file
-        for (const [key, batch] of this.batchCache.entries()) {
-            const fileResult = batch.files.find(f => f.generatedTests);
-            if (fileResult && fileResult.generatedTests) {
-                console.log("Returning cached tests from batch analysis");
-                return fileResult.generatedTests;
-            }
-        }
-        // Fallback to single call if not cached
-        return this.client.generateTests(code);
-    }
-    async fixError(code, error) {
-        if (!this.isInitialized) {
-            throw new Error("GeminiService not initialized");
-        }
-        // Check cache for pre-calculated fixes
-        // This is a simplification; matching specific errors to cached fixes is complex
-        // For now, we'll fall back to the direct call for specific error fixes
-        const fix = await this.client.fixError(code, error);
-        return {
-            fixedCode: fix.fixedCode,
-            explanation: "Fixed by Gemini AI",
-            diff: ""
-        };
-    }
-    async explainCode(code) {
-        return "Explanation not implemented yet";
-    }
-}
-exports.GeminiService = GeminiService;
-
-
-/***/ }),
-/* 21 */
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-/**
- * Mock Git Service
- *
- * Simulates git operations for UI development.
- * INTEGRATION: Replace with real GitService that uses simple-git.
- */
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MockGitService = void 0;
-class MockGitService {
-    currentBranch = 'feature/autonomous-copilot';
-    commits = [];
-    async createBranch(name) {
-        console.log(`[Mock Git] Creating branch: ${name}`);
-        await this.delay(300);
-        this.currentBranch = name;
-    }
-    async commit(message, files) {
-        console.log(`[Mock Git] Committing: ${message}`);
-        console.log(`[Mock Git] Files: ${files?.join(', ') || 'all changes'}`);
-        await this.delay(500);
-        const commit = {
-            hash: this.generateHash(),
-            message,
-            author: 'You',
-            date: new Date(),
-        };
-        this.commits.unshift(commit);
-    }
-    async applyDiff(diff) {
-        console.log(`[Mock Git] Applying diff:\n${diff}`);
-        await this.delay(400);
-    }
-    async getCurrentBranch() {
-        await this.delay(100);
-        return this.currentBranch;
-    }
-    async getRecentCommits(count) {
-        await this.delay(200);
-        // Return mock commits if none exist
-        if (this.commits.length === 0) {
-            return this.generateMockCommits(count);
-        }
-        return this.commits.slice(0, count);
-    }
-    generateMockCommits(count) {
-        const messages = [
-            'feat: Add autonomous analysis mode',
-            'fix: Handle edge case in context collection',
-            'refactor: Simplify issue detection logic',
-            'docs: Update README with usage examples',
-            'test: Add unit tests for AIService',
-            'style: Format code with prettier',
-            'chore: Update dependencies',
-        ];
-        const commits = [];
-        const now = Date.now();
-        for (let i = 0; i < Math.min(count, messages.length); i++) {
-            commits.push({
-                hash: this.generateHash(),
-                message: messages[i],
-                author: i % 3 === 0 ? 'Teammate' : 'You',
-                date: new Date(now - i * 3600000), // 1 hour apart
-            });
-        }
-        return commits;
-    }
-    generateHash() {
-        return Math.random().toString(36).substring(2, 9);
-    }
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-}
-exports.MockGitService = MockGitService;
-
-
-/***/ }),
-/* 22 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-"use strict";
-
-/**
- * Mock Voice Service
- *
- * Simulates voice notifications by showing console logs.
- * INTEGRATION: Replace with real VoiceService that calls ElevenLabs API.
- */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MockVoiceService = void 0;
-const vscode = __importStar(__webpack_require__(1));
-class MockVoiceService {
-    enabled;
-    constructor() {
-        // Read from configuration
-        this.enabled = vscode.workspace.getConfiguration('copilot').get('voice.enabled', true);
-    }
-    async speak(text, voice = 'professional') {
-        if (!this.enabled) {
-            console.log('[Mock Voice] Voice disabled, skipping notification');
-            return;
-        }
-        console.log(`[Mock Voice] 🔊 Would speak: "${text}" (${voice} voice)`);
-        // Show notification as visual feedback
-        const icon = this.getIconForVoice(voice);
-        vscode.window.showInformationMessage(`${icon} ${text}`);
-        // Simulate speech duration
-        await this.delay(text.length * 50); // ~50ms per character
-    }
-    isEnabled() {
-        return this.enabled;
-    }
-    setEnabled(enabled) {
-        this.enabled = enabled;
-        vscode.workspace.getConfiguration('copilot').update('voice.enabled', enabled, true);
-    }
-    getIconForVoice(voice) {
-        switch (voice) {
-            case 'casual':
-                return '😎';
-            case 'encouraging':
-                return '🎉';
-            case 'professional':
-            default:
-                return '🤖';
-        }
-    }
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-}
-exports.MockVoiceService = MockVoiceService;
-
-
-/***/ }),
-/* 23 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-"use strict";
-
-/**
- * Status Bar Manager
- *
- * Manages the status bar item that shows copilot state in the bottom bar.
- * States: Idle, Analyzing, Complete, Error
- */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.StatusBarManager = void 0;
-const vscode = __importStar(__webpack_require__(1));
-class StatusBarManager {
-    statusBarItem;
-    currentState = { status: 'idle' };
-    constructor() {
-        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-        this.statusBarItem.command = 'copilot.showPanel';
-        this.updateDisplay();
-        this.statusBarItem.show();
-    }
-    setState(state) {
-        this.currentState = state;
-        this.updateDisplay();
-        // Auto-reset from 'complete' state after 5 seconds
-        if (state.status === 'complete') {
-            setTimeout(() => {
-                if (this.currentState.status === 'complete') {
-                    this.setState({ status: 'idle' });
-                }
-            }, 5000);
-        }
-    }
-    updateDisplay() {
-        switch (this.currentState.status) {
-            case 'idle':
-                this.statusBarItem.text = '$(robot) Copilot: Ready';
-                this.statusBarItem.backgroundColor = undefined;
-                this.statusBarItem.tooltip = 'Click to open Autonomous Copilot dashboard';
-                break;
-            case 'analyzing':
-                this.statusBarItem.text = `$(sync~spin) Copilot: ${this.currentState.message || 'Analyzing'}...`;
-                this.statusBarItem.backgroundColor = undefined;
-                this.statusBarItem.tooltip = `Progress: ${this.currentState.progress}%`;
-                break;
-            case 'complete':
-                const issueText = this.currentState.issuesFound === 1 ? 'issue' : 'issues';
-                this.statusBarItem.text = `$(check) Copilot: Found ${this.currentState.issuesFound} ${issueText}`;
-                this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
-                this.statusBarItem.tooltip = 'Analysis complete! Click to view results';
-                break;
-            case 'error':
-                this.statusBarItem.text = '$(warning) Copilot: Error';
-                this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
-                this.statusBarItem.tooltip = `Error: ${this.currentState.error}`;
-                break;
-        }
-    }
-    dispose() {
-        this.statusBarItem.dispose();
-    }
-}
-exports.StatusBarManager = StatusBarManager;
-
-
-/***/ }),
-/* 24 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-"use strict";
-
-/**
- * Sidebar Dashboard Webview Provider
- *
- * Manages the main dashboard webview in the sidebar.
- */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.SidebarWebviewProvider = void 0;
-const path = __importStar(__webpack_require__(25));
-const fs = __importStar(__webpack_require__(6));
-class SidebarWebviewProvider {
-    extensionUri;
-    onMessage;
-    _view;
-    constructor(extensionUri, onMessage) {
-        this.extensionUri = extensionUri;
-        this.onMessage = onMessage;
-    }
-    resolveWebviewView(webviewView, context, _token) {
-        this._view = webviewView;
-        webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [this.extensionUri],
-        };
-        webviewView.webview.html = this.getHtmlContent(webviewView.webview);
-        // Handle messages from webview
-        webviewView.webview.onDidReceiveMessage((message) => {
-            this.onMessage(message);
-        });
-    }
-    /**
-     * Post a message to the webview
-     */
-    postMessage(message) {
-        if (this._view) {
-            this._view.webview.postMessage(message);
-        }
-    }
-    /**
-     * Update context in the webview
-     */
-    updateContext(context) {
-        this.postMessage({
-            type: 'contextUpdate',
-            payload: context,
-        });
-    }
-    /**
-     * Update analysis results in the webview
-     */
-    updateAnalysis(analysis) {
-        this.postMessage({
-            type: 'analysisComplete',
-            payload: analysis,
-        });
-    }
-    /**
-     * Update extension state
-     */
-    updateState(state) {
-        this.postMessage({
-            type: 'stateChanged',
-            state,
-        });
-    }
-    /**
-     * Show error in webview
-     */
-    showError(message) {
-        this.postMessage({
-            type: 'error',
-            message,
-        });
-    }
-    /**
-     * Reveal the webview
-     */
-    reveal() {
-        if (this._view) {
-            this._view.show(true);
-        }
-    }
-    getHtmlContent(webview) {
-        // Load HTML from file
-        const htmlPath = path.join(this.extensionUri.fsPath, 'src', 'ui', 'webview', 'dashboard.html');
-        let html = fs.readFileSync(htmlPath, 'utf8');
-        // Could inject nonce for security, add resource URIs, etc.
-        // For now, return as-is since we're using inline scripts/styles
-        return html;
-    }
-}
-exports.SidebarWebviewProvider = SidebarWebviewProvider;
-
-
-/***/ }),
-/* 25 */
-/***/ ((module) => {
-
-"use strict";
-module.exports = require("path");
-
-/***/ }),
-/* 26 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-"use strict";
-
-/**
- * Issues Tree View Provider
- *
- * Displays issues in a hierarchical tree structure:
- * - Root: Files with issues
- * - Children: Individual issues in each file
- */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.IssuesTreeProvider = void 0;
-const vscode = __importStar(__webpack_require__(1));
-class IssuesTreeProvider {
-    _onDidChangeTreeData = new vscode.EventEmitter();
-    onDidChangeTreeData = this._onDidChangeTreeData.event;
-    issues = [];
-    groupedIssues = new Map();
-    constructor() { }
-    /**
-     * Update the tree with new analysis results
-     */
-    updateAnalysis(analysis) {
-        this.issues = analysis.issues;
-        this.groupByFile();
-        this.refresh();
-    }
-    /**
-     * Clear all issues
-     */
-    clear() {
-        this.issues = [];
-        this.groupedIssues.clear();
-        this.refresh();
-    }
-    /**
-     * Refresh the tree view
-     */
-    refresh() {
-        this._onDidChangeTreeData.fire();
-    }
-    getTreeItem(element) {
-        return element;
-    }
-    getChildren(element) {
-        if (!element) {
-            // Root level: return file groups
-            return Promise.resolve(this.getFileGroupItems());
-        }
-        else {
-            // Child level: return issues for this file
-            return Promise.resolve(this.getIssueItems(element.resourceUri.fsPath));
-        }
-    }
-    groupByFile() {
-        this.groupedIssues.clear();
-        for (const issue of this.issues) {
-            if (!this.groupedIssues.has(issue.file)) {
-                this.groupedIssues.set(issue.file, []);
-            }
-            this.groupedIssues.get(issue.file).push(issue);
-        }
-    }
-    getFileGroupItems() {
-        const items = [];
-        for (const [file, issues] of this.groupedIssues.entries()) {
-            const errorCount = issues.filter(i => i.severity === 'error').length;
-            const warningCount = issues.filter(i => i.severity === 'warning').length;
-            const infoCount = issues.filter(i => i.severity === 'info').length;
-            const fileName = file.split('/').pop() || file;
-            const label = `${fileName} (${issues.length})`;
-            let description = [];
-            if (errorCount > 0) {
-                description.push(`${errorCount} errors`);
-            }
-            if (warningCount > 0) {
-                description.push(`${warningCount} warnings`);
-            }
-            if (infoCount > 0) {
-                description.push(`${infoCount} info`);
-            }
-            const item = new IssueTreeItem(label, vscode.TreeItemCollapsibleState.Expanded, 'file');
-            item.description = description.join(', ');
-            item.resourceUri = vscode.Uri.file(file);
-            item.iconPath = new vscode.ThemeIcon('file');
-            item.contextValue = 'fileGroup';
-            items.push(item);
-        }
-        return items;
-    }
-    getIssueItems(file) {
-        const issues = this.groupedIssues.get(file) || [];
-        return issues.map(issue => {
-            const item = new IssueTreeItem(issue.message, vscode.TreeItemCollapsibleState.None, 'issue');
-            item.description = `Line ${issue.line}`;
-            item.tooltip = this.createTooltip(issue);
-            item.iconPath = this.getIconForSeverity(issue.severity);
-            item.contextValue = 'issue';
-            // Click to navigate to issue
-            item.command = {
-                command: 'copilot.navigateToIssue',
-                title: 'Go to Issue',
-                arguments: [issue.file, issue.line, issue.column],
-            };
-            // Store issue data for context menu actions
-            item.issueData = issue;
-            return item;
-        });
-    }
-    createTooltip(issue) {
-        const tooltip = new vscode.MarkdownString();
-        tooltip.supportHtml = true;
-        tooltip.isTrusted = true;
-        tooltip.appendMarkdown(`**${issue.severity.toUpperCase()}**: ${issue.message}\n\n`);
-        tooltip.appendMarkdown(`**Location**: ${issue.file}:${issue.line}:${issue.column}\n\n`);
-        if (issue.codeSnippet) {
-            tooltip.appendMarkdown(`**Code**:\n\`\`\`\n${issue.codeSnippet}\n\`\`\`\n\n`);
-        }
-        if (issue.suggestedFix) {
-            tooltip.appendMarkdown(`**Suggested Fix**: ${issue.suggestedFix}`);
-        }
-        return tooltip;
-    }
-    getIconForSeverity(severity) {
-        switch (severity) {
-            case 'error':
-                return new vscode.ThemeIcon('error', new vscode.ThemeColor('editorError.foreground'));
-            case 'warning':
-                return new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground'));
-            case 'info':
-                return new vscode.ThemeIcon('info', new vscode.ThemeColor('editorInfo.foreground'));
-            default:
-                return new vscode.ThemeIcon('circle-outline');
-        }
-    }
-}
-exports.IssuesTreeProvider = IssuesTreeProvider;
-/**
- * Tree item for issues tree view
- */
-class IssueTreeItem extends vscode.TreeItem {
-    label;
-    collapsibleState;
-    type;
-    issueData;
-    constructor(label, collapsibleState, type) {
-        super(label, collapsibleState);
-        this.label = label;
-        this.collapsibleState = collapsibleState;
-        this.type = type;
-    }
-}
-
-
-/***/ }),
-/* 27 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-"use strict";
-
-/**
- * Notification Manager
- *
- * Handles VSCode notifications and progress indicators.
- */
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.NotificationManager = void 0;
-const vscode = __importStar(__webpack_require__(1));
-class NotificationManager {
-    /**
-     * Show a progress notification for long-running tasks
-     */
-    static async withProgress(title, task) {
-        return vscode.window.withProgress({
-            location: vscode.ProgressLocation.Notification,
-            title,
-            cancellable: false,
-        }, task);
-    }
-    /**
-     * Show a success notification
-     */
-    static showSuccess(message, ...actions) {
-        return vscode.window.showInformationMessage(message, ...actions);
-    }
-    /**
-     * Show a warning notification
-     */
-    static showWarning(message, ...actions) {
-        return vscode.window.showWarningMessage(message, ...actions);
-    }
-    /**
-     * Show an error notification
-     */
-    static showError(message, ...actions) {
-        return vscode.window.showErrorMessage(message, ...actions);
-    }
-    /**
-     * Show analysis complete notification with actions
-     */
-    static async showAnalysisComplete(issueCount) {
-        const issueText = issueCount === 1 ? 'issue' : 'issues';
-        const message = issueCount > 0
-            ? `🔍 Analysis complete! Found ${issueCount} ${issueText}.`
-            : '✅ Analysis complete! No issues found.';
-        const action = await this.showSuccess(message, 'View Results', 'Dismiss');
-        if (action === 'View Results') {
-            vscode.commands.executeCommand('copilot.showPanel');
-        }
-    }
-    /**
-     * Show autonomous mode notification
-     */
-    static async showAutonomousStarted() {
-        await this.showSuccess('🤖 Autonomous mode enabled. Copilot will analyze your code when idle.', 'Got it');
-    }
-    /**
-     * Show autonomous analysis notification
-     */
-    static async showAutonomousAnalysis(issueCount) {
-        const issueText = issueCount === 1 ? 'issue' : 'issues';
-        const action = await this.showSuccess(`🤖 Autonomous analysis complete! Found ${issueCount} ${issueText} while you were away.`, 'View Results', 'Dismiss');
-        if (action === 'View Results') {
-            vscode.commands.executeCommand('copilot.showPanel');
-        }
-    }
-    /**
-     * Show error with retry option
-     */
-    static async showErrorWithRetry(message, retryCallback) {
-        const action = await this.showError(message, 'Retry', 'Dismiss');
-        if (action === 'Retry') {
-            await retryCallback();
-        }
-    }
-    /**
-     * Show progress with steps
-     */
-    static async showProgressWithSteps(title, steps) {
-        await this.withProgress(title, async (progress) => {
-            const increment = 100 / steps.length;
-            for (const step of steps) {
-                progress.report({ message: step.message });
-                await step.task();
-                progress.report({ increment });
-            }
-        });
-    }
-}
-exports.NotificationManager = NotificationManager;
-
-
-/***/ }),
-/* 28 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -3143,18 +2151,276 @@ class FileWatcher {
 }
 exports.FileWatcher = FileWatcher;
 // Helper for path.basename since we don't import path
-const path = __importStar(__webpack_require__(25));
+const path = __importStar(__webpack_require__(29));
 
 
 /***/ }),
-/* 29 */
+/* 19 */
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+/**
+ * Mock Context Service
+ *
+ * Provides fake developer context data for UI development.
+ * INTEGRATION: Replace with real ContextService that uses vscode API.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MockContextService = void 0;
+const events_1 = __webpack_require__(20);
+class MockContextService extends events_1.EventEmitter {
+    mockContext;
+    constructor() {
+        super();
+        this.mockContext = this.generateMockContext();
+    }
+    async collectContext() {
+        // Simulate network delay
+        await this.delay(500);
+        // Update some fields to simulate real-time changes
+        this.mockContext.session.totalEdits += Math.floor(Math.random() * 5);
+        this.mockContext.files.activeFile = this.mockContext.files.openFiles[Math.floor(Math.random() * this.mockContext.files.openFiles.length)];
+        this.emit('contextCollected', this.mockContext);
+        return this.mockContext;
+    }
+    getCurrentFile() {
+        return this.mockContext.files.activeFile;
+    }
+    getRiskyFiles() {
+        return this.mockContext.session.riskyFiles;
+    }
+    generateMockContext() {
+        const now = new Date();
+        const oneHourAgo = new Date(now.getTime() - 3600000);
+        return {
+            git: {
+                recentCommits: [
+                    {
+                        hash: 'abc1234',
+                        message: 'feat: Add user authentication flow',
+                        author: 'You',
+                        date: new Date(now.getTime() - 7200000), // 2 hours ago
+                    },
+                    {
+                        hash: 'def5678',
+                        message: 'fix: Handle null reference in login',
+                        author: 'You',
+                        date: new Date(now.getTime() - 3600000), // 1 hour ago
+                    },
+                    {
+                        hash: '9ab0cde',
+                        message: 'refactor: Extract validation logic',
+                        author: 'Teammate',
+                        date: new Date(now.getTime() - 1800000), // 30 min ago
+                    },
+                ],
+                currentBranch: 'feature/autonomous-copilot',
+                uncommittedChanges: [
+                    { file: 'src/extension.ts', linesAdded: 47, linesRemoved: 12 },
+                    { file: 'src/services/mock/MockAIService.ts', linesAdded: 89, linesRemoved: 3 },
+                    { file: 'src/ui/StatusBarManager.ts', linesAdded: 25, linesRemoved: 0 },
+                ],
+            },
+            files: {
+                openFiles: [
+                    'src/extension.ts',
+                    'src/services/interfaces.ts',
+                    'src/services/mock/MockAIService.ts',
+                    'src/ui/StatusBarManager.ts',
+                    'README.md',
+                ],
+                activeFile: 'src/extension.ts',
+                recentlyEdited: [
+                    { file: 'src/extension.ts', timestamp: new Date(now.getTime() - 300000), changes: 15 },
+                    { file: 'src/services/mock/MockAIService.ts', timestamp: new Date(now.getTime() - 600000), changes: 23 },
+                    { file: 'src/ui/StatusBarManager.ts', timestamp: new Date(now.getTime() - 900000), changes: 8 },
+                ],
+                editFrequency: new Map([
+                    ['src/extension.ts', 27],
+                    ['src/services/interfaces.ts', 8],
+                    ['src/services/mock/MockAIService.ts', 15],
+                    ['src/ui/StatusBarManager.ts', 12],
+                    ['README.md', 3],
+                ]),
+            },
+            cursor: {
+                file: 'src/extension.ts',
+                line: 42,
+                column: 15,
+                currentFunction: 'activate',
+                selectedText: '',
+            },
+            timeline: {
+                edits: [
+                    { file: 'src/extension.ts', line: 42, timestamp: new Date(now.getTime() - 120000), chars: 25 },
+                    { file: 'src/extension.ts', line: 45, timestamp: new Date(now.getTime() - 180000), chars: 43 },
+                    { file: 'src/services/mock/MockAIService.ts', line: 67, timestamp: new Date(now.getTime() - 300000), chars: 18 },
+                ],
+                opens: [
+                    { file: 'src/extension.ts', timestamp: oneHourAgo },
+                    { file: 'src/services/interfaces.ts', timestamp: new Date(oneHourAgo.getTime() + 600000) },
+                ],
+                closes: [
+                    { file: 'package.json', timestamp: new Date(oneHourAgo.getTime() + 300000) },
+                ],
+            },
+            session: {
+                startTime: oneHourAgo,
+                totalEdits: 47,
+                riskyFiles: ['src/extension.ts', 'src/services/mock/MockAIService.ts'], // High edit frequency
+            },
+        };
+    }
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+exports.MockContextService = MockContextService;
+
+
+/***/ }),
+/* 20 */
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("events");
+
+/***/ }),
+/* 21 */
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.GeminiService = void 0;
+const gemini_client_1 = __webpack_require__(22);
+const context_builder_1 = __webpack_require__(24);
+const events_1 = __webpack_require__(20);
+class GeminiService extends events_1.EventEmitter {
+    client;
+    isInitialized = false;
+    batchCache = new Map();
+    constructor() {
+        super();
+        this.client = new gemini_client_1.GeminiClient();
+    }
+    async initialize(apiKey) {
+        await this.client.initialize(apiKey);
+        this.isInitialized = true;
+    }
+    /**
+     * Runs a batch analysis on the active file and potentially related files.
+     * This leverages the large context window to get analysis, tests, and fixes in one go.
+     */
+    async analyze(code, context) {
+        if (!this.isInitialized) {
+            const error = new Error("GeminiService not initialized. Please check your API key settings.");
+            this.emit('error', error);
+            throw error;
+        }
+        this.emit('analysisStarted');
+        try {
+            const geminiContext = context_builder_1.ContextBuilder.build({
+                gitLogs: context.git.recentCommits.map(c => `${c.hash.substring(0, 7)} - ${c.message}`),
+                gitDiff: "",
+                openFiles: context.files.openFiles,
+                activeFile: context.files.activeFile,
+                errors: [],
+                editHistory: context.files.recentlyEdited.map(e => ({
+                    file: e.file,
+                    timestamp: e.timestamp.getTime()
+                }))
+            });
+            // Prepare batch payload
+            const filesToAnalyze = new Map();
+            filesToAnalyze.set(context.files.activeFile, code);
+            // In a real scenario, we would read related files here and add them to the map
+            // For now, we focus on the active file but use the batch endpoint structure
+            this.emit('analysisProgress', 20, 'Sending batch context to Gemini...');
+            // Use runBatch instead of analyzeCode
+            const batchResult = await this.client.runBatch(filesToAnalyze, geminiContext);
+            // Cache the result for future use (e.g. generateTests calls)
+            this.batchCache.set(context.files.activeFile, batchResult);
+            this.emit('analysisProgress', 80, 'Processing batch results...');
+            // Extract analysis for the active file
+            const fileResult = batchResult.files.find(f => f.file === context.files.activeFile) || batchResult.files[0];
+            if (!fileResult) {
+                throw new Error("No analysis result found for active file");
+            }
+            const analysis = {
+                issues: fileResult.analysis.issues.map((i, idx) => ({
+                    id: `issue-${idx}`,
+                    file: context.files.activeFile,
+                    line: i.line,
+                    column: 0,
+                    severity: i.severity || 'warning',
+                    message: i.message
+                })),
+                suggestions: fileResult.analysis.suggestions.map(s => ({
+                    type: 'refactor',
+                    message: s
+                })),
+                riskLevel: fileResult.analysis.risk_level || 'low',
+                confidence: 0.9,
+                timestamp: new Date()
+            };
+            this.emit('analysisComplete', analysis);
+            return analysis;
+        }
+        catch (error) {
+            console.error("GeminiService Analysis Error:", error);
+            this.emit('error', error);
+            throw error;
+        }
+    }
+    async generateTests(code) {
+        if (!this.isInitialized) {
+            throw new Error("GeminiService not initialized");
+        }
+        // Check cache first
+        // Note: In a real app, we'd need a better cache key than just the file content or path
+        // For now, we assume the last analysis run populated the cache for the active file
+        for (const [key, batch] of this.batchCache.entries()) {
+            const fileResult = batch.files.find(f => f.generatedTests);
+            if (fileResult && fileResult.generatedTests) {
+                console.log("Returning cached tests from batch analysis");
+                return fileResult.generatedTests;
+            }
+        }
+        // Fallback to single call if not cached
+        return this.client.generateTests(code);
+    }
+    async fixError(code, error) {
+        if (!this.isInitialized) {
+            throw new Error("GeminiService not initialized");
+        }
+        // Check cache for pre-calculated fixes
+        // This is a simplification; matching specific errors to cached fixes is complex
+        // For now, we'll fall back to the direct call for specific error fixes
+        const fix = await this.client.fixError(code, error);
+        return {
+            fixedCode: fix.fixedCode,
+            explanation: "Fixed by Gemini AI",
+            diff: ""
+        };
+    }
+    async explainCode(code) {
+        return "Explanation not implemented yet";
+    }
+}
+exports.GeminiService = GeminiService;
+
+
+/***/ }),
+/* 22 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.GeminiClient = void 0;
-const prompts_1 = __webpack_require__(30);
+const prompts_1 = __webpack_require__(23);
 class GeminiClient {
     apiKey = "";
     model = "gemini-2.5-flash";
@@ -3396,7 +2662,7 @@ exports.GeminiClient = GeminiClient;
 
 
 /***/ }),
-/* 30 */
+/* 23 */
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -3542,7 +2808,7 @@ exports.PromptTemplates = PromptTemplates;
 
 
 /***/ }),
-/* 31 */
+/* 24 */
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -3578,6 +2844,740 @@ class ContextBuilder {
     }
 }
 exports.ContextBuilder = ContextBuilder;
+
+
+/***/ }),
+/* 25 */
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+/**
+ * Mock Git Service
+ *
+ * Simulates git operations for UI development.
+ * INTEGRATION: Replace with real GitService that uses simple-git.
+ */
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MockGitService = void 0;
+class MockGitService {
+    currentBranch = 'feature/autonomous-copilot';
+    commits = [];
+    async createBranch(name) {
+        console.log(`[Mock Git] Creating branch: ${name}`);
+        await this.delay(300);
+        this.currentBranch = name;
+    }
+    async commit(message, files) {
+        console.log(`[Mock Git] Committing: ${message}`);
+        console.log(`[Mock Git] Files: ${files?.join(', ') || 'all changes'}`);
+        await this.delay(500);
+        const commit = {
+            hash: this.generateHash(),
+            message,
+            author: 'You',
+            date: new Date(),
+        };
+        this.commits.unshift(commit);
+    }
+    async applyDiff(diff) {
+        console.log(`[Mock Git] Applying diff:\n${diff}`);
+        await this.delay(400);
+    }
+    async getCurrentBranch() {
+        await this.delay(100);
+        return this.currentBranch;
+    }
+    async getRecentCommits(count) {
+        await this.delay(200);
+        // Return mock commits if none exist
+        if (this.commits.length === 0) {
+            return this.generateMockCommits(count);
+        }
+        return this.commits.slice(0, count);
+    }
+    generateMockCommits(count) {
+        const messages = [
+            'feat: Add autonomous analysis mode',
+            'fix: Handle edge case in context collection',
+            'refactor: Simplify issue detection logic',
+            'docs: Update README with usage examples',
+            'test: Add unit tests for AIService',
+            'style: Format code with prettier',
+            'chore: Update dependencies',
+        ];
+        const commits = [];
+        const now = Date.now();
+        for (let i = 0; i < Math.min(count, messages.length); i++) {
+            commits.push({
+                hash: this.generateHash(),
+                message: messages[i],
+                author: i % 3 === 0 ? 'Teammate' : 'You',
+                date: new Date(now - i * 3600000), // 1 hour apart
+            });
+        }
+        return commits;
+    }
+    generateHash() {
+        return Math.random().toString(36).substring(2, 9);
+    }
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+exports.MockGitService = MockGitService;
+
+
+/***/ }),
+/* 26 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+/**
+ * Mock Voice Service
+ *
+ * Simulates voice notifications by showing console logs.
+ * INTEGRATION: Replace with real VoiceService that calls ElevenLabs API.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.MockVoiceService = void 0;
+const vscode = __importStar(__webpack_require__(1));
+class MockVoiceService {
+    enabled;
+    constructor() {
+        // Read from configuration
+        this.enabled = vscode.workspace.getConfiguration('copilot').get('voice.enabled', true);
+    }
+    async speak(text, voice = 'professional') {
+        if (!this.enabled) {
+            console.log('[Mock Voice] Voice disabled, skipping notification');
+            return;
+        }
+        console.log(`[Mock Voice] 🔊 Would speak: "${text}" (${voice} voice)`);
+        // Show notification as visual feedback
+        const icon = this.getIconForVoice(voice);
+        vscode.window.showInformationMessage(`${icon} ${text}`);
+        // Simulate speech duration
+        await this.delay(text.length * 50); // ~50ms per character
+    }
+    isEnabled() {
+        return this.enabled;
+    }
+    setEnabled(enabled) {
+        this.enabled = enabled;
+        vscode.workspace.getConfiguration('copilot').update('voice.enabled', enabled, true);
+    }
+    getIconForVoice(voice) {
+        switch (voice) {
+            case 'casual':
+                return '😎';
+            case 'encouraging':
+                return '🎉';
+            case 'professional':
+            default:
+                return '🤖';
+        }
+    }
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+}
+exports.MockVoiceService = MockVoiceService;
+
+
+/***/ }),
+/* 27 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+/**
+ * Status Bar Manager
+ *
+ * Manages the status bar item that shows copilot state in the bottom bar.
+ * States: Idle, Analyzing, Complete, Error
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.StatusBarManager = void 0;
+const vscode = __importStar(__webpack_require__(1));
+class StatusBarManager {
+    statusBarItem;
+    currentState = { status: 'idle' };
+    constructor() {
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+        this.statusBarItem.command = 'copilot.showPanel';
+        this.updateDisplay();
+        this.statusBarItem.show();
+    }
+    setState(state) {
+        this.currentState = state;
+        this.updateDisplay();
+        // Auto-reset from 'complete' state after 5 seconds
+        if (state.status === 'complete') {
+            setTimeout(() => {
+                if (this.currentState.status === 'complete') {
+                    this.setState({ status: 'idle' });
+                }
+            }, 5000);
+        }
+    }
+    updateDisplay() {
+        switch (this.currentState.status) {
+            case 'idle':
+                this.statusBarItem.text = '$(robot) Copilot: Ready';
+                this.statusBarItem.backgroundColor = undefined;
+                this.statusBarItem.tooltip = 'Click to open Autonomous Copilot dashboard';
+                break;
+            case 'analyzing':
+                this.statusBarItem.text = `$(sync~spin) Copilot: ${this.currentState.message || 'Analyzing'}...`;
+                this.statusBarItem.backgroundColor = undefined;
+                this.statusBarItem.tooltip = `Progress: ${this.currentState.progress}%`;
+                break;
+            case 'complete':
+                const issueText = this.currentState.issuesFound === 1 ? 'issue' : 'issues';
+                this.statusBarItem.text = `$(check) Copilot: Found ${this.currentState.issuesFound} ${issueText}`;
+                this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.prominentBackground');
+                this.statusBarItem.tooltip = 'Analysis complete! Click to view results';
+                break;
+            case 'error':
+                this.statusBarItem.text = '$(warning) Copilot: Error';
+                this.statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+                this.statusBarItem.tooltip = `Error: ${this.currentState.error}`;
+                break;
+        }
+    }
+    dispose() {
+        this.statusBarItem.dispose();
+    }
+}
+exports.StatusBarManager = StatusBarManager;
+
+
+/***/ }),
+/* 28 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+/**
+ * Sidebar Dashboard Webview Provider
+ *
+ * Manages the main dashboard webview in the sidebar.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.SidebarWebviewProvider = void 0;
+const path = __importStar(__webpack_require__(29));
+const fs = __importStar(__webpack_require__(6));
+class SidebarWebviewProvider {
+    extensionUri;
+    onMessage;
+    _view;
+    constructor(extensionUri, onMessage) {
+        this.extensionUri = extensionUri;
+        this.onMessage = onMessage;
+    }
+    resolveWebviewView(webviewView, context, _token) {
+        this._view = webviewView;
+        webviewView.webview.options = {
+            enableScripts: true,
+            localResourceRoots: [this.extensionUri],
+        };
+        webviewView.webview.html = this.getHtmlContent(webviewView.webview);
+        // Handle messages from webview
+        webviewView.webview.onDidReceiveMessage((message) => {
+            this.onMessage(message);
+        });
+    }
+    /**
+     * Post a message to the webview
+     */
+    postMessage(message) {
+        if (this._view) {
+            this._view.webview.postMessage(message);
+        }
+    }
+    /**
+     * Update context in the webview
+     */
+    updateContext(context) {
+        this.postMessage({
+            type: 'contextUpdate',
+            payload: context,
+        });
+    }
+    /**
+     * Update analysis results in the webview
+     */
+    updateAnalysis(analysis) {
+        this.postMessage({
+            type: 'analysisComplete',
+            payload: analysis,
+        });
+    }
+    /**
+     * Update extension state
+     */
+    updateState(state) {
+        this.postMessage({
+            type: 'stateChanged',
+            state,
+        });
+    }
+    /**
+     * Show error in webview
+     */
+    showError(message) {
+        this.postMessage({
+            type: 'error',
+            message,
+        });
+    }
+    /**
+     * Reveal the webview
+     */
+    reveal() {
+        if (this._view) {
+            this._view.show(true);
+        }
+    }
+    getHtmlContent(webview) {
+        // Load HTML from file
+        const htmlPath = path.join(this.extensionUri.fsPath, 'src', 'ui', 'webview', 'dashboard.html');
+        let html = fs.readFileSync(htmlPath, 'utf8');
+        // Could inject nonce for security, add resource URIs, etc.
+        // For now, return as-is since we're using inline scripts/styles
+        return html;
+    }
+}
+exports.SidebarWebviewProvider = SidebarWebviewProvider;
+
+
+/***/ }),
+/* 29 */
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("path");
+
+/***/ }),
+/* 30 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+/**
+ * Issues Tree View Provider
+ *
+ * Displays issues in a hierarchical tree structure:
+ * - Root: Files with issues
+ * - Children: Individual issues in each file
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.IssuesTreeProvider = void 0;
+const vscode = __importStar(__webpack_require__(1));
+class IssuesTreeProvider {
+    _onDidChangeTreeData = new vscode.EventEmitter();
+    onDidChangeTreeData = this._onDidChangeTreeData.event;
+    issues = [];
+    groupedIssues = new Map();
+    constructor() { }
+    /**
+     * Update the tree with new analysis results
+     */
+    updateAnalysis(analysis) {
+        this.issues = analysis.issues;
+        this.groupByFile();
+        this.refresh();
+    }
+    /**
+     * Clear all issues
+     */
+    clear() {
+        this.issues = [];
+        this.groupedIssues.clear();
+        this.refresh();
+    }
+    /**
+     * Refresh the tree view
+     */
+    refresh() {
+        this._onDidChangeTreeData.fire();
+    }
+    getTreeItem(element) {
+        return element;
+    }
+    getChildren(element) {
+        if (!element) {
+            // Root level: return file groups
+            return Promise.resolve(this.getFileGroupItems());
+        }
+        else {
+            // Child level: return issues for this file
+            return Promise.resolve(this.getIssueItems(element.resourceUri.fsPath));
+        }
+    }
+    groupByFile() {
+        this.groupedIssues.clear();
+        for (const issue of this.issues) {
+            if (!this.groupedIssues.has(issue.file)) {
+                this.groupedIssues.set(issue.file, []);
+            }
+            this.groupedIssues.get(issue.file).push(issue);
+        }
+    }
+    getFileGroupItems() {
+        const items = [];
+        for (const [file, issues] of this.groupedIssues.entries()) {
+            const errorCount = issues.filter(i => i.severity === 'error').length;
+            const warningCount = issues.filter(i => i.severity === 'warning').length;
+            const infoCount = issues.filter(i => i.severity === 'info').length;
+            const fileName = file.split('/').pop() || file;
+            const label = `${fileName} (${issues.length})`;
+            let description = [];
+            if (errorCount > 0) {
+                description.push(`${errorCount} errors`);
+            }
+            if (warningCount > 0) {
+                description.push(`${warningCount} warnings`);
+            }
+            if (infoCount > 0) {
+                description.push(`${infoCount} info`);
+            }
+            const item = new IssueTreeItem(label, vscode.TreeItemCollapsibleState.Expanded, 'file');
+            item.description = description.join(', ');
+            item.resourceUri = vscode.Uri.file(file);
+            item.iconPath = new vscode.ThemeIcon('file');
+            item.contextValue = 'fileGroup';
+            items.push(item);
+        }
+        return items;
+    }
+    getIssueItems(file) {
+        const issues = this.groupedIssues.get(file) || [];
+        return issues.map(issue => {
+            const item = new IssueTreeItem(issue.message, vscode.TreeItemCollapsibleState.None, 'issue');
+            item.description = `Line ${issue.line}`;
+            item.tooltip = this.createTooltip(issue);
+            item.iconPath = this.getIconForSeverity(issue.severity);
+            item.contextValue = 'issue';
+            // Click to navigate to issue
+            item.command = {
+                command: 'copilot.navigateToIssue',
+                title: 'Go to Issue',
+                arguments: [issue.file, issue.line, issue.column],
+            };
+            // Store issue data for context menu actions
+            item.issueData = issue;
+            return item;
+        });
+    }
+    createTooltip(issue) {
+        const tooltip = new vscode.MarkdownString();
+        tooltip.supportHtml = true;
+        tooltip.isTrusted = true;
+        tooltip.appendMarkdown(`**${issue.severity.toUpperCase()}**: ${issue.message}\n\n`);
+        tooltip.appendMarkdown(`**Location**: ${issue.file}:${issue.line}:${issue.column}\n\n`);
+        if (issue.codeSnippet) {
+            tooltip.appendMarkdown(`**Code**:\n\`\`\`\n${issue.codeSnippet}\n\`\`\`\n\n`);
+        }
+        if (issue.suggestedFix) {
+            tooltip.appendMarkdown(`**Suggested Fix**: ${issue.suggestedFix}`);
+        }
+        return tooltip;
+    }
+    getIconForSeverity(severity) {
+        switch (severity) {
+            case 'error':
+                return new vscode.ThemeIcon('error', new vscode.ThemeColor('editorError.foreground'));
+            case 'warning':
+                return new vscode.ThemeIcon('warning', new vscode.ThemeColor('editorWarning.foreground'));
+            case 'info':
+                return new vscode.ThemeIcon('info', new vscode.ThemeColor('editorInfo.foreground'));
+            default:
+                return new vscode.ThemeIcon('circle-outline');
+        }
+    }
+}
+exports.IssuesTreeProvider = IssuesTreeProvider;
+/**
+ * Tree item for issues tree view
+ */
+class IssueTreeItem extends vscode.TreeItem {
+    label;
+    collapsibleState;
+    type;
+    issueData;
+    constructor(label, collapsibleState, type) {
+        super(label, collapsibleState);
+        this.label = label;
+        this.collapsibleState = collapsibleState;
+        this.type = type;
+    }
+}
+
+
+/***/ }),
+/* 31 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+/**
+ * Notification Manager
+ *
+ * Handles VSCode notifications and progress indicators.
+ */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.NotificationManager = void 0;
+const vscode = __importStar(__webpack_require__(1));
+class NotificationManager {
+    /**
+     * Show a progress notification for long-running tasks
+     */
+    static async withProgress(title, task) {
+        return vscode.window.withProgress({
+            location: vscode.ProgressLocation.Notification,
+            title,
+            cancellable: false,
+        }, task);
+    }
+    /**
+     * Show a success notification
+     */
+    static showSuccess(message, ...actions) {
+        return vscode.window.showInformationMessage(message, ...actions);
+    }
+    /**
+     * Show a warning notification
+     */
+    static showWarning(message, ...actions) {
+        return vscode.window.showWarningMessage(message, ...actions);
+    }
+    /**
+     * Show an error notification
+     */
+    static showError(message, ...actions) {
+        return vscode.window.showErrorMessage(message, ...actions);
+    }
+    /**
+     * Show analysis complete notification with actions
+     */
+    static async showAnalysisComplete(issueCount) {
+        const issueText = issueCount === 1 ? 'issue' : 'issues';
+        const message = issueCount > 0
+            ? `🔍 Analysis complete! Found ${issueCount} ${issueText}.`
+            : '✅ Analysis complete! No issues found.';
+        const action = await this.showSuccess(message, 'View Results', 'Dismiss');
+        if (action === 'View Results') {
+            vscode.commands.executeCommand('copilot.showPanel');
+        }
+    }
+    /**
+     * Show autonomous mode notification
+     */
+    static async showAutonomousStarted() {
+        await this.showSuccess('🤖 Autonomous mode enabled. Copilot will analyze your code when idle.', 'Got it');
+    }
+    /**
+     * Show autonomous analysis notification
+     */
+    static async showAutonomousAnalysis(issueCount) {
+        const issueText = issueCount === 1 ? 'issue' : 'issues';
+        const action = await this.showSuccess(`🤖 Autonomous analysis complete! Found ${issueCount} ${issueText} while you were away.`, 'View Results', 'Dismiss');
+        if (action === 'View Results') {
+            vscode.commands.executeCommand('copilot.showPanel');
+        }
+    }
+    /**
+     * Show error with retry option
+     */
+    static async showErrorWithRetry(message, retryCallback) {
+        const action = await this.showError(message, 'Retry', 'Dismiss');
+        if (action === 'Retry') {
+            await retryCallback();
+        }
+    }
+    /**
+     * Show progress with steps
+     */
+    static async showProgressWithSteps(title, steps) {
+        await this.withProgress(title, async (progress) => {
+            const increment = 100 / steps.length;
+            for (const step of steps) {
+                progress.report({ message: step.message });
+                await step.task();
+                progress.report({ increment });
+            }
+        });
+    }
+}
+exports.NotificationManager = NotificationManager;
 
 
 /***/ }),
@@ -3622,7 +3622,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.LintingService = void 0;
 const vscode = __importStar(__webpack_require__(1));
-const events_1 = __webpack_require__(19);
+const events_1 = __webpack_require__(20);
 const linting_1 = __webpack_require__(33);
 /**
  * LintingService manages VS Code diagnostics and triggers linting
