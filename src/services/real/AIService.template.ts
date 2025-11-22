@@ -137,6 +137,22 @@ Include:
 	}
 
 	/**
+	 * Summarize text
+	 */
+	async summarize(text: string): Promise<string> {
+		// TODO: Call Gemini to summarize the text
+		return '';
+	}
+
+	/**
+	 * Create a plan based on goal and context
+	 */
+	async plan(goal: string, context: DeveloperContext): Promise<string> {
+		// TODO: Call Gemini to generate a plan
+		return '';
+	}
+
+	/**
 	 * Build analysis prompt with context
 	 */
 	private buildAnalysisPrompt(code: string, context: DeveloperContext): string {

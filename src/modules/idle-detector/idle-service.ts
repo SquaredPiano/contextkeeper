@@ -1,16 +1,19 @@
 import * as vscode from 'vscode';
 import { IdleDetector } from './idle-detector';
 import { IIdleService, IdleConfig } from './types';
-import { storage } from '../../services/storage';
+import { IStorageService } from '../../services/interfaces';
 import { EventRecord } from '../../services/storage/schema';
 
 export class IdleService implements IIdleService {
     private detector: IdleDetector;
     private lastSessionTime: number = Date.now();
     private isEnabled: boolean = true;
+    private storage: IStorageService;
+    private onIdleCallback?: () => Promise<void>;
 
-    constructor(config: IdleConfig = { thresholdMs: 5 * 60 * 1000 }) { // Default 5 minutes
+    constructor(storage: IStorageService, config: IdleConfig = { thresholdMs: 15 * 1000 }) { // Default 15 seconds for faster testing
         this.detector = new IdleDetector(config);
+        this.storage = storage;
     }
 
     public async initialize(): Promise<void> {
@@ -20,28 +23,34 @@ export class IdleService implements IIdleService {
         this.detector.on('active', () => this.handleActive());
         
         this.detector.start();
-        
-        // Ensure storage is connected (lazy)
-        try {
-            await storage.connect();
-        } catch (error) {
-            console.error('[IdleService] Failed to connect to storage:', error);
-        }
     }
 
     public dispose(): void {
         this.detector.dispose();
     }
 
+    /**
+     * Register a callback to be invoked when user goes idle
+     */
+    public onIdle(callback: () => Promise<void>): void {
+        this.onIdleCallback = callback;
+    }
+
     private async handleIdle(): Promise<void> {
         if (!this.isEnabled) { return; }
-        console.log('[IdleService] Handling idle state...');
+        console.log('[IdleService] User went idle! Triggering autonomous work...');
 
         try {
+            // Show notification
+            vscode.window.showInformationMessage('You went idle! Starting autonomous work...');
+
+            // Trigger the registered callback (autonomous agent)
+            if (this.onIdleCallback) {
+                await this.onIdleCallback();
+            }
+
             // 1. Fetch events since last session
-            // We don't have a direct "since timestamp" query in storage yet, so we fetch recent and filter
-            // TODO: Optimize storage query to support "since"
-            const recentEvents = await storage.getRecentEvents(100);
+            const recentEvents = await this.storage.getRecentEvents(100);
             const newEvents = recentEvents.filter(e => e.timestamp > this.lastSessionTime);
 
             if (newEvents.length === 0) {
@@ -54,7 +63,7 @@ export class IdleService implements IIdleService {
             const project = vscode.workspace.name || 'Unknown Project';
 
             // 3. Create Session in DB
-            const session = await storage.createSession(summary, project);
+            const session = await this.storage.createSession(summary, project);
             console.log(`[IdleService] Created session: ${session.id} - ${session.summary}`);
 
             // 4. Update last session time

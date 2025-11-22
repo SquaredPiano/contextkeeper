@@ -14,7 +14,7 @@ import { ContextIngestionService } from "./services/ingestion/ContextIngestionSe
 import { IngestionVerifier } from "./services/ingestion/IngestionVerifier";
 import { AutonomousAgent } from './modules/autonomous/AutonomousAgent';
 import { DashboardProvider } from './ui/DashboardProvider';
-import { storage } from "./services/storage";
+import { IdleService } from './modules/idle-detector/idle-service';
 
 // Import real services
 import { ContextService } from './services/real/ContextService';
@@ -57,6 +57,8 @@ let gitService: IGitService;
 let voiceService: IVoiceService;
 let lintingService: LintingService;
 let ingestionService: ContextIngestionService;
+let idleService: IdleService;
+let autonomousAgent: AutonomousAgent;
 
 // State
 let currentContext: DeveloperContext | null = null;
@@ -65,20 +67,38 @@ let isAutonomousMode = false;
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
+export async function activate(context: vscode.ExtensionContext) {
   console.log('Autonomous Copilot extension is now active!');
 
   try {
     const geminiService = new GeminiService();
     aiService = geminiService;
 
-    // 1. Initialize Services
+    // Try to get API key from settings
+    const config = vscode.workspace.getConfiguration('copilot');
+    const geminiApiKey = config.get<string>('gemini.apiKey') || process.env.GEMINI_API_KEY || "";
+
+    if (geminiApiKey) {
+      await geminiService.initialize(geminiApiKey);
+      console.log("Gemini Service initialized with API Key");
+    } else {
+      console.warn("No Gemini API Key found. AI features will be disabled.");
+      NotificationManager.showError("Gemini API Key missing. Please set 'copilot.gemini.apiKey' in settings.");
+    }
+
+    // 1. Initialize Services with proper sequencing
     const storageService = new LanceDBStorage();
-    contextService = new ContextService(storageService, aiService); // Assign to global contextService
+    
+    // Initialize storage with embedding service
+    await storageService.connect(geminiService);
+    console.log("Storage Service initialized");
+    
+    contextService = new ContextService(storageService, aiService);
     const sessionManager = new SessionManager(storageService);
 
     // Initialize Session (Async)
-    sessionManager.initialize().catch((err: any) => console.error("Failed to init session:", err));
+    await sessionManager.initialize();
+    console.log("Session Manager initialized");
 
     // Initialize Linting Service
     lintingService = new LintingService(); 
@@ -88,35 +108,17 @@ export function activate(context: vscode.ExtensionContext) {
     const outputChannel = vscode.window.createOutputChannel("ContextKeeper Ingestion");
     ingestionService = new ContextIngestionService(storageService, contextService, sessionManager);
 
-    // Don't await here to avoid blocking activation
-    ingestionService.initialize(context).catch((err: any) => {
-      console.error("Failed to initialize ingestion service:", err);
-      outputChannel.appendLine(`Error initializing ingestion: ${err.message}`);
-    });
-
-    // Try to get API key from settings
-    const ckConfig = vscode.workspace.getConfiguration('copilot');
-    const apiKey = ckConfig.get<string>('gemini.apiKey') || process.env.GEMINI_API_KEY || "";
-
-    if (apiKey) {
-      geminiService.initialize(apiKey).then(() => {
-        console.log("Gemini Service initialized with API Key");
-      }).catch(err => {
-        console.error("Failed to initialize Gemini Service:", err);
-        NotificationManager.showError("Failed to connect to Gemini AI. Check your API Key.");
-      });
-    } else {
-      console.warn("No Gemini API Key found. AI features will be disabled or mocked.");
-      NotificationManager.showError("Gemini API Key missing. Please set 'contextkeeper.gemini.apiKey' in settings.");
-    }
+    // Initialize ingestion service
+    await ingestionService.initialize(context, outputChannel);
+    console.log("Ingestion Service initialized");
 
     // Initialize Git Service
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     gitService = new GitService(workspaceRoot);
 
     // Initialize Voice Service (Real or Mock)
-    const elevenLabsApiKey = ckConfig.get<string>('elevenlabs.apiKey') || process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY || "";
-    const voiceEnabled = ckConfig.get<boolean>('voice.enabled', true);
+    const elevenLabsApiKey = config.get<string>('elevenlabs.apiKey') || process.env.ELEVEN_LABS_API_KEY || process.env.ELEVENLABS_API_KEY || "";
+    const voiceEnabled = config.get<boolean>('voice.enabled', true);
 
     if (voiceEnabled && elevenLabsApiKey) {
       const realVoiceService = new ElevenLabsService();
@@ -161,7 +163,8 @@ export function activate(context: vscode.ExtensionContext) {
       voiceService,
       sidebarProvider,
       statusBar,
-      issuesTreeProvider
+      issuesTreeProvider,
+      storageService
     );
     commandManager.registerCommands();
 
@@ -174,7 +177,6 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // Load autonomous mode from settings
-    const config = vscode.workspace.getConfiguration('copilot');
     isAutonomousMode = config.get('autonomous.enabled', false);
 
     // Show welcome notification
@@ -201,26 +203,29 @@ export function activate(context: vscode.ExtensionContext) {
     );
 
     // 4. Initialize Autonomous Agent
-    const agent = new AutonomousAgent(gitService, geminiService, contextService);
+    autonomousAgent = new AutonomousAgent(gitService, geminiService, contextService);
 
-    // 5. Start Autonomous Scheduler
-    const SCHEDULER_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-    const schedulerInterval = setInterval(async () => {
-      console.log('ContextKeeper: Triggering scheduled autonomous task...');
+    // 5. Initialize Idle Detection Service
+    idleService = new IdleService(storageService, { thresholdMs: 15000 }); // 15 seconds for demo
+    await idleService.initialize();
+    
+    // Wire idle detection to autonomous agent
+    idleService.onIdle(async () => {
+      console.log('ContextKeeper: Idle detected, triggering autonomous work...');
       try {
-        // Only run if not already running
-        // We can check agent state if we expose it, or just fire and let it handle concurrency
-        await agent.startSession('auto-lint');
+        // Run both linting and test generation when idle
+        await autonomousAgent.startSession('auto-lint');
         
         if (voiceService && voiceService.isEnabled()) {
-            voiceService.speak("I've completed a scheduled autonomous check.", 'casual');
+          voiceService.speak("I've completed autonomous work while you were away.", 'casual');
         }
       } catch (error) {
-        console.error('Scheduled task failed:', error);
+        console.error('Autonomous task failed:', error);
+        vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
-    }, SCHEDULER_INTERVAL_MS);
+    });
 
-    context.subscriptions.push({ dispose: () => clearInterval(schedulerInterval) });
+    context.subscriptions.push(idleService);
 
     // Register Verification Command
     context.subscriptions.push(

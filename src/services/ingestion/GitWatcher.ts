@@ -1,5 +1,9 @@
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
+import * as cp from 'child_process';
+import * as util from 'util';
+
+const exec = util.promisify(cp.exec);
 
 export interface GitCommitEvent {
   hash: string;
@@ -118,19 +122,21 @@ export class GitWatcher extends EventEmitter {
               if (commits.length > 0) {
                   const commit = commits[0];
                   
-                  // Only emit if it's actually a new commit (not just a checkout of an old one, ideally)
-                  // But for tracking "user context", switching branches is also relevant context!
-                  // However, the interface expects "GitCommitEvent".
-                  // Let's emit it.
-                  
+                  // Fetch changed files using git CLI
+                  let files: string[] = [];
+                  try {
+                      const { stdout } = await exec(`git show --name-only --pretty="" ${commit.hash}`, { cwd: this.workspaceRoot });
+                      files = stdout.split('\n').filter(line => line.trim() !== '');
+                  } catch (gitError) {
+                      console.error('Error fetching changed files via git CLI:', gitError);
+                  }
+
                   const event: GitCommitEvent = {
                       hash: commit.hash,
                       message: commit.message,
                       author: commit.authorName || 'Unknown',
                       date: commit.authorDate?.toISOString() || new Date().toISOString(),
-                      files: [] // VS Code Git API log doesn't easily give files in the summary, would need `git show`.
-                                // For now, we leave files empty or we could use `git diff-tree` if we had access to raw git.
-                                // Or we can use our `GitService` to fetch details if needed.
+                      files: files
                   };
                   
                   this.emit('commit', event);

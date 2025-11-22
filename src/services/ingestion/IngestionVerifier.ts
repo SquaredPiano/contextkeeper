@@ -38,17 +38,26 @@ export class IngestionVerifier {
         const functionEdits = editEvents.filter(e => {
             try {
                 const meta = JSON.parse(e.metadata);
-                return meta.function !== undefined;
+                // Check for new array format or old string format
+                return (meta.affectedFunctions && meta.affectedFunctions.length > 0) || meta.function !== undefined;
             } catch (e) { return false; }
         });
 
         if (functionEdits.length > 0) {
-            this.log(`✅ Semantic Function Tracking verified. Found edits in: ${functionEdits.map(e => JSON.parse(e.metadata).function).join(', ')}`);
+            this.log(`✅ Semantic Function Tracking verified. Found edits in functions.`);
         } else {
             this.log('⚠️ No function-specific edits found. Try editing inside a function.');
         }
 
-        // 3. Verify Git Commits
+        // 3. Verify File Focus
+        const focusEvents = recentEvents.filter(e => e.event_type === 'file_focus');
+        if (focusEvents.length > 0) {
+            this.log('✅ File Focus tracking verified.');
+        } else {
+            this.log('⚠️ No file_focus events found. Try switching tabs.');
+        }
+
+        // 4. Verify Git Commits
         const commitEvents = recentEvents.filter(e => e.event_type === 'git_commit');
         if (commitEvents.length > 0) {
             this.log('✅ Git Commit tracking verified.');

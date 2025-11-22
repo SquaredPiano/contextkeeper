@@ -12,6 +12,8 @@ import {
 	FileEvent,
 } from '../interfaces';
 import { getDocumentSymbols, findFunctionAtPosition } from '../../utils/symbolUtils';
+import { ContextBuilder } from '../../modules/gemini/context-builder';
+import { RawLogInput } from '../../modules/gemini/types';
 
 export class ContextService extends EventEmitter implements IContextService {
 	private storage: IStorageService;
@@ -25,12 +27,10 @@ export class ContextService extends EventEmitter implements IContextService {
 
 	/**
 	 * Collect comprehensive developer context from workspace and LanceDB
+	 * Now uses ContextBuilder for RAG-enhanced context
 	 */
 	async collectContext(): Promise<DeveloperContext> {
 		try {
-			// Ensure storage is connected (if needed, though usually initialized in extension)
-			// await this.storage.connect(); // Assuming connection is handled externally or implicitly
-
 			// 1. Fetch recent events from LanceDB
 			const recentEvents = await this.storage.getRecentEvents(100);
 
@@ -39,6 +39,26 @@ export class ContextService extends EventEmitter implements IContextService {
 			const fileContext = await this.collectFileContext(recentEvents);
 			const timeline = this.processTimeline(recentEvents);
 			const session = this.processSession(recentEvents);
+
+			// 3. Use ContextBuilder for enhanced context with RAG
+			// Build raw input for ContextBuilder
+			const rawInput: RawLogInput = {
+				gitLogs: gitContext.recentCommits.map(c => c.message),
+				openFiles: fileContext.openFiles,
+				activeFile: fileContext.activeFile,
+				editHistory: timeline.edits.map(e => ({ file: e.file, timestamp: e.timestamp.getTime() })),
+				fileContents: new Map(),
+				errors: [] // Could be populated from diagnostics if needed
+			};
+
+			// Get enhanced context from ContextBuilder (includes RAG from vector DB)
+			const geminiContext = await ContextBuilder.build(rawInput, this.storage);
+			
+			// Log for debugging
+			console.log('[ContextService] RAG-enhanced context retrieved:', {
+				relevantPastSessions: geminiContext.relevantPastSessions?.length || 0,
+				relatedFiles: geminiContext.relatedFiles.length
+			});
 
 			const context: DeveloperContext = {
 				git: gitContext,

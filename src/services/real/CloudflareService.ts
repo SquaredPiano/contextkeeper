@@ -1,39 +1,50 @@
 import fetch from 'node-fetch';
+import * as vscode from 'vscode';
 import { AIAnalysis, Issue } from '../interfaces';
 
 export class CloudflareService {
     private workerUrl: string;
 
-    constructor(workerUrl: string = 'https://contextkeeper-lint-worker.vishnu.workers.dev') {
-        this.workerUrl = workerUrl;
+    constructor(workerUrl?: string) {
+        // Try to get from settings, otherwise use default or provided
+        const config = vscode.workspace.getConfiguration('copilot');
+        this.workerUrl = workerUrl || 
+                        config.get<string>('cloudflare.workerUrl') || 
+                        'https://contextkeeper-lint-worker.vishnu.workers.dev';
+        
+        console.log(`[CloudflareService] Using worker URL: ${this.workerUrl}`);
     }
 
     async lintCode(code: string, language: string): Promise<Issue[]> {
-        console.log(`[CloudflareService] Linting ${language} code...`);
+        console.log(`[CloudflareService] Linting ${language} code via ${this.workerUrl}...`);
 
         try {
             // Try to call the real worker
             const response = await fetch(this.workerUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code, language })
+                body: JSON.stringify({ code, language }),
+                // Add timeout
+                signal: AbortSignal.timeout(10000) // 10 second timeout
             });
 
             if (!response.ok) {
-                throw new Error(`Worker returned ${response.status}`);
+                throw new Error(`Worker returned ${response.status}: ${response.statusText}`);
             }
 
-            const rawIssues = await response.json();
+            const data: any = await response.json();
+            const rawIssues = data.issues || data || [];
+            
             return rawIssues.map((i: any) => ({
                 id: `lint-${Date.now()}-${Math.random()}`,
                 file: 'unknown', // Caller should set this
-                line: i.line,
-                column: 0,
-                severity: i.severity,
-                message: i.message
+                line: i.line || 1,
+                column: i.column || 0,
+                severity: i.severity || 'warning',
+                message: i.message || 'Linting issue detected'
             }));
         } catch (error) {
-            console.warn('Cloudflare linting failed, falling back to local regex linting:', error);
+            console.warn('[CloudflareService] Linting failed, falling back to local regex linting:', error);
             return this.localLint(code, language);
         }
     }
