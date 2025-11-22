@@ -133,4 +133,56 @@ describe('GeminiClient', () => {
     expect(callCount).toBe(3);
     expect(result.risk_level).toBe('low');
   });
+
+  it('should generate tests', async () => {
+    await client.initialize('test-key');
+    
+    const mockResponse = {
+      candidates: [{
+        content: {
+          parts: [{
+            text: 'describe("test", () => {});'
+          }]
+        }
+      }]
+    };
+
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => mockResponse
+    });
+
+    const tests = await client.generateTests('function foo() {}');
+    expect(tests).toBe('describe("test", () => {});');
+  });
+
+  it('should fix errors and parse JSON response', async () => {
+    await client.initialize('test-key');
+    
+    const fixResponse = {
+      fixedCode: 'fixed',
+      confidence: 0.95,
+      explanation: 'Fixed typo'
+    };
+
+    const mockResponse = {
+      candidates: [{
+        content: {
+          parts: [{
+            text: JSON.stringify(fixResponse)
+          }]
+        }
+      }]
+    };
+
+    (global.fetch as any).mockResolvedValue({
+      ok: true,
+      json: async () => mockResponse
+    });
+
+    const result = await client.fixError('broken', 'error');
+    expect(result.fixedCode).toBe('fixed');
+    expect(result.confidence).toBe(0.95);
+    expect(result.explanation).toBe('Fixed typo');
+  });
 });

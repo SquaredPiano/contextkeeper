@@ -31,36 +31,50 @@ describe('IdleDetector', () => {
     detector.on('idle', idleSpy);
     
     detector.start();
+    expect(detector.isIdle).toBe(false);
     
     // Fast forward time
     vi.advanceTimersByTime(1001);
     
     expect(idleSpy).toHaveBeenCalled();
+    expect(detector.isIdle).toBe(true);
   });
 
-  it('should reset timer on activity', () => {
+  it('should reset timer on activity and emit active if was idle', () => {
+    const idleSpy = vi.fn();
+    const activeSpy = vi.fn();
+    detector.on('idle', idleSpy);
+    detector.on('active', activeSpy);
+    
+    detector.start();
+    
+    // Go idle
+    vi.advanceTimersByTime(1001);
+    expect(idleSpy).toHaveBeenCalled();
+    expect(detector.isIdle).toBe(true);
+    
+    // Simulate activity
+    (detector as any).resetTimer();
+    
+    expect(activeSpy).toHaveBeenCalled();
+    expect(detector.isIdle).toBe(false);
+    
+    // Wait again but not enough
+    vi.advanceTimersByTime(500);
+    expect(idleSpy).toHaveBeenCalledTimes(1); // Still 1
+  });
+
+  it('should update threshold dynamically', () => {
     const idleSpy = vi.fn();
     detector.on('idle', idleSpy);
     
     detector.start();
+    detector.setThreshold(2000);
     
-    // Advance 500ms (halfway)
-    vi.advanceTimersByTime(500);
-    
-    // Simulate activity (resetTimer is private, but triggered by event listeners)
-    // We can simulate the effect by calling the private method if we cast to any, 
-    // or better, verify that start() registers listeners that call reset.
-    // For this unit test, let's access the private method to ensure logic works.
-    (detector as any).resetTimer();
-    
-    // Advance another 600ms (total 1100ms from start, but only 600ms from reset)
-    vi.advanceTimersByTime(600);
-    
+    vi.advanceTimersByTime(1500);
     expect(idleSpy).not.toHaveBeenCalled();
     
-    // Advance remaining 401ms
-    vi.advanceTimersByTime(401);
-    
+    vi.advanceTimersByTime(501);
     expect(idleSpy).toHaveBeenCalled();
   });
 

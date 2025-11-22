@@ -92,11 +92,23 @@ async function audit() {
     console.error("❌ Batch processing failed:", e.message);
   }
 
-  // Test 4: JSON Parsing Robustness (Simulated)
-  // We can't easily inject a bad response into the real client without mocking fetch, 
-  // but we can verify the client handles the real response which might contain markdown.
-  // The previous tests implicitly cover this if they succeed.
-  
+  // Test 4: Error Fixing
+  console.log("\n--- Test 4: Error Fixing ---");
+  try {
+    const fixResult = await client.fixError("const x: number = 'string';", "Type 'string' is not assignable to type 'number'.");
+    
+    if (fixResult.confidence > 0 && fixResult.fixedCode) {
+      console.log("✅ Error fixing successful");
+      console.log("   Confidence:", fixResult.confidence);
+      console.log("   Explanation:", fixResult.explanation);
+      console.log("   Fixed Code:", fixResult.fixedCode.trim());
+    } else {
+      console.error("❌ Error fixing returned invalid structure", fixResult);
+    }
+  } catch (e: any) {
+    console.error("❌ Error fixing failed:", e.message);
+  }
+
   console.log("\n🏁 Audit Complete");
 }
 

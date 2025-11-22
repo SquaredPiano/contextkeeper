@@ -19,7 +19,11 @@ function detectLanguage(code: string): Language {
     } catch {}
   }
 
-  if (/def\s+\w+\(.*\)\s*:/.test(code)) {return "python";}
+  // Python detection (improved)
+  if (/def\s+\w+\(.*\)\s*:/.test(code) || /import\s+os\b/.test(code) || /import\s+sys\b/.test(code) || /from\s+\w+\s+import/.test(code)) {
+    return "python";
+  }
+
   if (/package\s+\w+/.test(code) || /func\s+\w+\(/.test(code)) {return "go";}
   if (/:\s*\w+/.test(code) && /import\s+/.test(code)) {return "ts";}
   if (/import\s+|export\s+|function\s+|\=\>/.test(code)) {return "js";}
@@ -124,31 +128,48 @@ function scanJsTsRisks(code: string, lang: Language): Risk[] {
 function lintJsTs(code: string): string {
   let fixed = code;
 
-  // Semicolons at end of lines
+  // Semicolons at end of lines (naive)
   fixed = fixed.replace(/([^;{}\s])\n/g, "$1;\n");
 
   // == → === if not part of !=
   fixed = fixed.replace(/([^!])==([^=])/g, "$1=== $2");
 
-  // Spaces after keywords (if, for, while, switch)
-  fixed = fixed.replace(/\b(if|for|while|switch)\(/g, "$1 (");
+  // Spaces after keywords (if, for, while, switch, catch)
+  fixed = fixed.replace(/\b(if|for|while|switch|catch)\(/g, "$1 (");
+  
+  // Space after function name
+  fixed = fixed.replace(/\bfunction\s+(\w+)\(/g, "function $1 (");
 
   // Space around operators
   fixed = fixed.replace(/\s*([=+\-*/<>])\s*/g, " $1 ");
 
-  // Remove unused imports
+  // Remove unused imports (naive)
   fixed = fixed.replace(/import\s+(\w+)[^;\n]*;\n/g, (line, name) => {return fixed.includes(name) ? line : "";});
 
   // Trim trailing whitespace + collapse blank lines
   fixed = fixed.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n");
 
-  return fixed
-    .split("\n")
-    .map(line => {
-      const depth = (line.match(/{/g)?.length || 0) - (line.match(/}/g)?.length || 0);
-      return "  ".repeat(Math.max(depth, 0)) + line.trim();
-    })
-    .join("\n");
+  // Simple indentation fix
+  const lines = fixed.split("\n");
+  let depth = 0;
+  const indented = lines.map(line => {
+    const trimmed = line.trim();
+    // Decrease depth if line starts with }
+    if (trimmed.startsWith("}")) {
+      depth = Math.max(0, depth - 1);
+    }
+    
+    const indent = "  ".repeat(depth);
+    const result = indent + trimmed;
+    
+    // Increase depth if line ends with {
+    if (trimmed.endsWith("{")) {
+      depth++;
+    }
+    return result;
+  });
+
+  return indented.join("\n");
 }
 
 // worker

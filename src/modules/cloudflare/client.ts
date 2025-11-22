@@ -18,28 +18,28 @@ export class CloudflareClient {
     this.timeoutMs = timeoutMs;
   }
 
-  private async withTimeout<T>(promise: Promise<T>): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-      const timer = setTimeout(() => {reject(new Error("Cloudflare timeout"));}, this.timeoutMs);
-      promise
-        .then((res) => {
-          clearTimeout(timer);
-          resolve(res);
-        })
-        .catch((err) => {
-          clearTimeout(timer);
-          reject(err);
-        });
-    });
+  private async withTimeout<T>(promiseFactory: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      const result = await promiseFactory(controller.signal);
+      clearTimeout(timeout);
+      return result;
+    } catch (error) {
+      clearTimeout(timeout);
+      throw error;
+    }
   }
 
   async lint(code: string): Promise<CloudflareLintResult | null> {
     try {
-      const response = await this.withTimeout(
+      const response = await this.withTimeout((signal) => 
         fetch(`${this.url}/lint`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ code })
+          body: JSON.stringify({ code }),
+          signal
         })
       );
 

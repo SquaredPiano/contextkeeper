@@ -45,18 +45,18 @@ exports.deactivate = deactivate;
 // Import the module and reference it with the alias vscode in your code below
 const vscode = __importStar(__webpack_require__(1));
 const gitlog_1 = __webpack_require__(2);
-const fileWatcher_1 = __webpack_require__(18);
+const fileWatcher_1 = __webpack_require__(28);
 const LintingService_1 = __webpack_require__(32);
 // Import mock services (INTEGRATION POINT: Replace with real services here)
-const MockContextService_1 = __webpack_require__(19);
-const GeminiService_1 = __webpack_require__(21); // Real AI Service
-const MockGitService_1 = __webpack_require__(25);
-const MockVoiceService_1 = __webpack_require__(26);
+const MockContextService_1 = __webpack_require__(18);
+const GeminiService_1 = __webpack_require__(20); // Real AI Service
+const MockGitService_1 = __webpack_require__(21);
+const MockVoiceService_1 = __webpack_require__(22);
 // Import UI components
-const StatusBarManager_1 = __webpack_require__(27);
-const SidebarWebviewProvider_1 = __webpack_require__(28);
-const IssuesTreeProvider_1 = __webpack_require__(30);
-const NotificationManager_1 = __webpack_require__(31);
+const StatusBarManager_1 = __webpack_require__(23);
+const SidebarWebviewProvider_1 = __webpack_require__(24);
+const IssuesTreeProvider_1 = __webpack_require__(26);
+const NotificationManager_1 = __webpack_require__(27);
 // Global state
 let statusBar;
 let sidebarProvider;
@@ -1995,172 +1995,6 @@ module.exports = require("node:tty");
 
 /***/ }),
 /* 18 */
-/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
-
-"use strict";
-
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.FileWatcher = void 0;
-const vscode = __importStar(__webpack_require__(1));
-class FileWatcher {
-    watcher = null;
-    disposables = [];
-    lintingEndpoint;
-    constructor(lintingEndpoint = "https://your-worker.workers.dev/lint") {
-        this.lintingEndpoint = lintingEndpoint;
-    }
-    /**
-     * Start watching files in the workspace
-     */
-    start() {
-        console.log("[FileWatcher] Starting file monitoring...");
-        // Method 1: Watch specific file patterns (glob patterns)
-        // This creates a watcher for TypeScript and JavaScript files
-        this.watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,js,tsx,jsx}", // Watch these file types
-        false, // Don't ignore creates
-        false, // Don't ignore changes
-        false // Don't ignore deletes
-        );
-        // React to file creation
-        this.watcher.onDidCreate((uri) => {
-            console.log(`[FileWatcher] File created: ${uri.fsPath}`);
-            vscode.window.showInformationMessage(`📄 New file: ${uri.fsPath}`);
-        });
-        // React to file changes
-        this.watcher.onDidChange((uri) => {
-            console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
-        });
-        // React to file deletion
-        this.watcher.onDidDelete((uri) => {
-            console.log(`[FileWatcher] File deleted: ${uri.fsPath}`);
-        });
-        // Method 2: Watch for document saves (best for auto-linting)
-        const saveWatcher = vscode.workspace.onDidSaveTextDocument(async (document) => {
-            await this.onFileSaved(document);
-        });
-        // Method 3: Watch for any text document changes (real-time)
-        const changeWatcher = vscode.workspace.onDidChangeTextDocument((event) => {
-            // Only process if there are actual content changes
-            if (event.contentChanges.length > 0) {
-                console.log(`[FileWatcher] Document modified: ${event.document.fileName}`);
-            }
-        });
-        this.disposables.push(saveWatcher, changeWatcher);
-    }
-    /**
-     * Handle file save event - auto-lint the file
-     */
-    async onFileSaved(document) {
-        // Only process certain file types
-        const validExtensions = [".ts", ".js", ".tsx", ".jsx"];
-        const fileExt = document.fileName.substring(document.fileName.lastIndexOf("."));
-        if (!validExtensions.includes(fileExt)) {
-            return; // Skip non-code files
-        }
-        console.log(`[FileWatcher] Auto-linting: ${document.fileName}`);
-        try {
-            const code = document.getText();
-            // Call your Cloudflare worker to lint the code
-            const response = await fetch(this.lintingEndpoint, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code }),
-            });
-            if (!response.ok) {
-                throw new Error(`Linting failed: ${response.statusText}`);
-            }
-            const result = await response.json();
-            // Show results to user
-            if (result.warnings && result.warnings.length > 0) {
-                const message = `⚠️ ${result.warnings.length} issue(s) found in ${document.fileName}`;
-                vscode.window.showWarningMessage(message);
-                // Optionally show detailed warnings in output channel
-                const outputChannel = vscode.window.createOutputChannel("Auto-Linter");
-                outputChannel.clear();
-                outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===\n`);
-                result.warnings.forEach((warning) => {
-                    outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
-                });
-                outputChannel.show();
-            }
-            else {
-                vscode.window.showInformationMessage(`✅ No issues found in ${document.fileName}`);
-            }
-            // If linting produced a fixed version, optionally apply it
-            if (result.linted && result.fixed !== code) {
-                const applyFix = await vscode.window.showInformationMessage("Apply auto-fix?", "Yes", "No");
-                if (applyFix === "Yes") {
-                    await this.applyFix(document, result.fixed);
-                }
-            }
-        }
-        catch (error) {
-            console.error("[FileWatcher] Linting error:", error);
-            vscode.window.showErrorMessage(`Linting failed: ${error}`);
-        }
-    }
-    /**
-     * Apply the fixed code to the document
-     */
-    async applyFix(document, fixedCode) {
-        const edit = new vscode.WorkspaceEdit();
-        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
-        edit.replace(document.uri, fullRange, fixedCode);
-        await vscode.workspace.applyEdit(edit);
-        await document.save();
-        vscode.window.showInformationMessage("✅ Auto-fix applied!");
-    }
-    /**
-     * Stop watching files and clean up
-     */
-    stop() {
-        if (this.watcher) {
-            this.watcher.dispose();
-            this.watcher = null;
-        }
-        this.disposables.forEach((d) => d.dispose());
-        this.disposables = [];
-        console.log("[FileWatcher] Stopped file monitoring");
-    }
-}
-exports.FileWatcher = FileWatcher;
-
-
-/***/ }),
-/* 19 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 "use strict";
@@ -2173,7 +2007,7 @@ exports.FileWatcher = FileWatcher;
  */
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.MockContextService = void 0;
-const events_1 = __webpack_require__(20);
+const events_1 = __webpack_require__(19);
 class MockContextService extends events_1.EventEmitter {
     mockContext;
     constructor() {
@@ -2285,23 +2119,23 @@ exports.MockContextService = MockContextService;
 
 
 /***/ }),
-/* 20 */
+/* 19 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("events");
 
 /***/ }),
-/* 21 */
+/* 20 */
 /***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.GeminiService = void 0;
-const gemini_client_1 = __webpack_require__(22);
-const context_builder_1 = __webpack_require__(24);
-const events_1 = __webpack_require__(20);
+const gemini_client_1 = __webpack_require__(29);
+const context_builder_1 = __webpack_require__(31);
+const events_1 = __webpack_require__(19);
 class GeminiService extends events_1.EventEmitter {
     client;
     isInitialized = false;
@@ -2418,418 +2252,7 @@ exports.GeminiService = GeminiService;
 
 
 /***/ }),
-/* 22 */
-/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.GeminiClient = void 0;
-const prompts_1 = __webpack_require__(23);
-class GeminiClient {
-    apiKey = "";
-    model = "gemini-2.5-flash";
-    ready = false;
-    lastRequestTime = 0;
-    minRequestInterval = 2000; // 2 seconds between requests to be safe
-    async initialize(apiKey) {
-        this.apiKey = apiKey;
-        this.model = "gemini-2.5-flash"; // Reset to default model
-        this.ready = true;
-    }
-    isReady() {
-        return this.ready;
-    }
-    enableMockMode() {
-        this.model = "mock";
-    }
-    async rateLimit() {
-        const now = Date.now();
-        const timeSinceLast = now - this.lastRequestTime;
-        if (timeSinceLast < this.minRequestInterval) {
-            const wait = this.minRequestInterval - timeSinceLast;
-            await new Promise(resolve => setTimeout(resolve, wait));
-        }
-        this.lastRequestTime = Date.now();
-    }
-    async runBatch(files, context) {
-        if (!this.ready) {
-            throw new Error("GeminiClient not initialized");
-        }
-        await this.rateLimit();
-        if (this.model === "mock") {
-            return {
-                globalSummary: "Mock batch analysis",
-                files: Array.from(files.keys()).map(f => ({
-                    file: f,
-                    analysis: { issues: [], suggestions: [], risk_level: 'low' },
-                    generatedTests: "// Mock tests",
-                    suggestedFixes: []
-                }))
-            };
-        }
-        const prompt = prompts_1.PromptTemplates.batchProcess(files, context);
-        try {
-            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }]
-                })
-            });
-            if (!response.ok) {
-                throw new Error(`Gemini API error: ${response.statusText}`);
-            }
-            const data = await response.json();
-            return this.parseBatchResponse(data);
-        }
-        catch (error) {
-            console.error("Gemini batch analysis failed:", error);
-            throw error;
-        }
-    }
-    parseBatchResponse(data) {
-        try {
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            const firstBrace = text.indexOf('{');
-            const lastBrace = text.lastIndexOf('}');
-            if (firstBrace === -1 || lastBrace === -1) {
-                throw new Error("No JSON object found in response");
-            }
-            const jsonStr = text.substring(firstBrace, lastBrace + 1);
-            return JSON.parse(jsonStr);
-        }
-        catch (e) {
-            console.warn("Failed to parse Gemini batch response:", e);
-            return {
-                globalSummary: "Failed to parse AI response",
-                files: []
-            };
-        }
-    }
-    async analyzeCode(code, context) {
-        if (!this.ready) {
-            throw new Error("GeminiClient not initialized");
-        }
-        await this.rateLimit();
-        if (this.model === "mock") {
-            return {
-                issues: [
-                    { line: 1, severity: "warning", message: "Mock issue: Variable might be undefined" }
-                ],
-                suggestions: ["Add a null check"],
-                risk_level: "low",
-                summary: "Mock analysis result"
-            };
-        }
-        const prompt = prompts_1.PromptTemplates.codeAnalysis(code, context);
-        try {
-            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }]
-                })
-            });
-            if (!response.ok) {
-                throw new Error(`Gemini API error: ${response.statusText}`);
-            }
-            const data = await response.json();
-            return this.parseAnalysis(data);
-        }
-        catch (error) {
-            console.error("Gemini analysis failed:", error);
-            throw error;
-        }
-    }
-    async fetchWithRetry(url, options, retries = 3) {
-        for (let i = 0; i < retries; i++) {
-            try {
-                const response = await fetch(url, options);
-                if (response.ok) {
-                    return response;
-                }
-                console.warn(`Gemini API attempt ${i + 1} failed: ${response.status} ${response.statusText}`);
-                // If 429 (Too Many Requests) or 5xx, retry
-                if (response.status === 429 || response.status >= 500) {
-                    const delay = Math.pow(2, i) * 1000; // Exponential backoff
-                    await new Promise(resolve => setTimeout(resolve, delay));
-                    continue;
-                }
-                return response;
-            }
-            catch (error) {
-                console.warn(`Gemini API network error attempt ${i + 1}:`, error);
-                if (i === retries - 1) {
-                    throw error;
-                }
-                const delay = Math.pow(2, i) * 1000;
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
-        }
-        throw new Error("Max retries exceeded");
-    }
-    parseAnalysis(data) {
-        try {
-            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-            // Robust JSON extraction: find the first '{' and the last '}'
-            const firstBrace = text.indexOf('{');
-            const lastBrace = text.lastIndexOf('}');
-            if (firstBrace === -1 || lastBrace === -1) {
-                throw new Error("No JSON object found in response");
-            }
-            const jsonStr = text.substring(firstBrace, lastBrace + 1);
-            const parsed = JSON.parse(jsonStr);
-            return {
-                issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-                suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
-                risk_level: parsed.risk_level || 'low',
-                summary: parsed.summary
-            };
-        }
-        catch (e) {
-            console.warn("Failed to parse Gemini response:", e);
-            console.warn("Raw response text:", data.candidates?.[0]?.content?.parts?.[0]?.text);
-            // Fallback
-            return {
-                issues: [],
-                suggestions: ["Failed to parse AI response. Please try again."],
-                risk_level: 'low',
-                summary: "Error parsing AI response."
-            };
-        }
-    }
-    async generateTests(functionCode) {
-        if (!this.ready) {
-            throw new Error("GeminiClient not initialized");
-        }
-        if (this.model === "mock") {
-            return `
-describe('generatedTest', () => {
-  it('should work', () => {
-    expect(true).toBe(true);
-  });
-});`;
-        }
-        const prompt = prompts_1.PromptTemplates.testGeneration(functionCode);
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        });
-        const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        return text;
-    }
-    async fixError(code, error) {
-        if (!this.ready) {
-            throw new Error("GeminiClient not initialized");
-        }
-        if (this.model === "mock") {
-            return {
-                fixedCode: code + "\n// Fixed by mock",
-                confidence: 0.9
-            };
-        }
-        const prompt = prompts_1.PromptTemplates.errorFix(code, error);
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        });
-        const data = await response.json();
-        const fixedCode = data.candidates?.[0]?.content?.parts?.[0]?.text || code;
-        return {
-            fixedCode,
-            confidence: 0.85
-        };
-    }
-}
-exports.GeminiClient = GeminiClient;
-
-
-/***/ }),
-/* 23 */
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.PromptTemplates = void 0;
-class PromptTemplates {
-    static codeAnalysis(code, context) {
-        const relatedFilesStr = context.relatedFiles.length > 0
-            ? context.relatedFiles.join(", ")
-            : "None";
-        const commitsStr = context.recentCommits.length > 0
-            ? context.recentCommits.join("\n- ")
-            : "None";
-        const errorsStr = context.recentErrors.length > 0
-            ? context.recentErrors.join("\n- ")
-            : "None";
-        return `
-You are an expert AI coding assistant. Your task is to analyze the provided code within the context of the user's current workflow.
-
-CONTEXT:
-- Active File: ${context.activeFile || "Unknown"}
-- Related Open Files: ${relatedFilesStr}
-- Recent Git Commits:
-- ${commitsStr}
-- Recent Workspace Errors:
-- ${errorsStr}
-- Edit Frequency: ${context.editCount} edits in session
-
-GIT DIFF SUMMARY (Recent changes):
-${context.gitDiffSummary}
-
-CODE TO ANALYZE:
-\`\`\`
-${code}
-\`\`\`
-
-INSTRUCTIONS:
-Analyze the code for:
-1.  **Correctness**: Logic errors, bugs, potential runtime issues.
-2.  **Quality**: Code smells, maintainability, readability.
-3.  **Contextual Relevance**: Does this code align with the recent commits and changes?
-4.  **Security**: Potential vulnerabilities.
-
-Respond in valid JSON format ONLY:
-{
-  "issues": [
-    { "line": number, "severity": "error"|"warning"|"info", "message": "string" }
-  ],
-  "suggestions": ["string"],
-  "risk_level": "low"|"medium"|"high",
-  "summary": "Brief summary of what the user seems to be working on based on this code and context",
-  "context_analysis": "Analysis of how this code fits into the broader project context"
-}
-    `.trim();
-    }
-    static testGeneration(functionCode) {
-        return `
-Generate comprehensive unit tests for the following function using Vitest.
-Include imports, describe blocks, and it blocks covering happy paths and edge cases.
-
-Code:
-\`\`\`
-${functionCode}
-\`\`\`
-    `.trim();
-    }
-    static batchProcess(files, context) {
-        const fileList = Array.from(files.entries()).map(([name, content]) => `
---- FILE: ${name} ---
-${content}
----------------------
-`).join("\n");
-        const commitsStr = context.recentCommits.length > 0
-            ? context.recentCommits.join("\n- ")
-            : "None";
-        return `
-You are an expert AI coding assistant. Perform a deep, batched analysis on the following files.
-
-CONTEXT:
-- Recent Git Commits:
-- ${commitsStr}
-- Git Diff Summary:
-${context.gitDiffSummary}
-
-FILES TO PROCESS:
-${fileList}
-
-INSTRUCTIONS:
-For EACH file provided above, perform the following:
-1.  **Analyze**: Find bugs, logic errors, and code smells.
-2.  **Generate Tests**: Create a comprehensive unit test suite (Vitest) for the file.
-3.  **Suggest Fixes**: For any "error" or "high" severity issue found, provide a corrected code snippet.
-
-Respond in valid JSON format ONLY with this structure:
-{
-  "globalSummary": "Overview of the changes and health of these files",
-  "files": [
-    {
-      "file": "filename",
-      "analysis": {
-        "issues": [ { "line": number, "severity": "error"|"warning"|"info", "message": "string" } ],
-        "suggestions": ["string"],
-        "risk_level": "low"|"medium"|"high",
-        "summary": "File specific summary"
-      },
-      "generatedTests": "string (full test file content)",
-      "suggestedFixes": [
-        {
-          "issueId": "issue-index (0, 1, etc)",
-          "fix": { "fixedCode": "string", "confidence": number, "explanation": "string" }
-        }
-      ]
-    }
-  ]
-}
-    `.trim();
-    }
-    static errorFix(code, error) {
-        return `
-Fix the following error in the code. Return ONLY the fixed code block without markdown formatting if possible, or inside a single code block.
-
-Error:
-${error}
-
-Code:
-\`\`\`
-${code}
-\`\`\`
-    `.trim();
-    }
-}
-exports.PromptTemplates = PromptTemplates;
-
-
-/***/ }),
-/* 24 */
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.ContextBuilder = void 0;
-class ContextBuilder {
-    static build(raw) {
-        const { gitLogs = [], gitDiff = "", openFiles = [], activeFile = null, errors = [], editHistory = [], fileContents = new Map() } = raw;
-        // 1. Identify related files based on active file
-        // Simple heuristic: same directory or imported (mock logic for imports)
-        const relatedFiles = openFiles.filter(f => f !== activeFile);
-        // 2. Summarize Git Diff (don't just truncate, maybe prioritize modified files)
-        let diffSummary = gitDiff || "";
-        if (diffSummary.length > 8000) {
-            diffSummary = diffSummary.substring(0, 8000) + "\n... [truncated]";
-        }
-        // 3. Build open file contents map for context
-        const openFileContents = new Map();
-        if (activeFile && fileContents.has(activeFile)) {
-            openFileContents.set(activeFile, fileContents.get(activeFile));
-        }
-        // Add other open files if small enough? For now just active.
-        return {
-            activeFile: activeFile || null,
-            recentCommits: gitLogs.slice(0, 10), // Increased context
-            recentErrors: errors.slice(0, 5),
-            gitDiffSummary: diffSummary,
-            editCount: editHistory.length,
-            relatedFiles: relatedFiles,
-            openFileContents: openFileContents
-        };
-    }
-}
-exports.ContextBuilder = ContextBuilder;
-
-
-/***/ }),
-/* 25 */
+/* 21 */
 /***/ ((__unused_webpack_module, exports) => {
 
 "use strict";
@@ -2911,7 +2334,7 @@ exports.MockGitService = MockGitService;
 
 
 /***/ }),
-/* 26 */
+/* 22 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -3002,7 +2425,7 @@ exports.MockVoiceService = MockVoiceService;
 
 
 /***/ }),
-/* 27 */
+/* 23 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -3103,7 +2526,7 @@ exports.StatusBarManager = StatusBarManager;
 
 
 /***/ }),
-/* 28 */
+/* 24 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -3148,7 +2571,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.SidebarWebviewProvider = void 0;
-const path = __importStar(__webpack_require__(29));
+const path = __importStar(__webpack_require__(25));
 const fs = __importStar(__webpack_require__(6));
 class SidebarWebviewProvider {
     extensionUri;
@@ -3235,14 +2658,14 @@ exports.SidebarWebviewProvider = SidebarWebviewProvider;
 
 
 /***/ }),
-/* 29 */
+/* 25 */
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("path");
 
 /***/ }),
-/* 30 */
+/* 26 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -3432,7 +2855,7 @@ class IssueTreeItem extends vscode.TreeItem {
 
 
 /***/ }),
-/* 31 */
+/* 27 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
 "use strict";
@@ -3563,6 +2986,601 @@ exports.NotificationManager = NotificationManager;
 
 
 /***/ }),
+/* 28 */
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.FileWatcher = void 0;
+const vscode = __importStar(__webpack_require__(1));
+class FileWatcher {
+    watcher = null;
+    disposables = [];
+    lintingEndpoint;
+    outputChannel;
+    constructor(lintingEndpoint = "https://your-worker.workers.dev/lint") {
+        this.lintingEndpoint = lintingEndpoint;
+        this.outputChannel = vscode.window.createOutputChannel("Auto-Linter");
+    }
+    /**
+     * Start watching files in the workspace
+     */
+    start() {
+        this.outputChannel.appendLine("[FileWatcher] Starting file monitoring...");
+        // Method 1: Watch specific file patterns (glob patterns)
+        // This creates a watcher for TypeScript and JavaScript files
+        this.watcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,js,tsx,jsx}", // Watch these file types
+        false, // Don't ignore creates
+        false, // Don't ignore changes
+        false // Don't ignore deletes
+        );
+        // React to file creation
+        this.watcher.onDidCreate((uri) => {
+            this.outputChannel.appendLine(`[FileWatcher] File created: ${uri.fsPath}`);
+        });
+        // React to file changes
+        this.watcher.onDidChange((uri) => {
+            // console.log(`[FileWatcher] File changed: ${uri.fsPath}`);
+        });
+        // React to file deletion
+        this.watcher.onDidDelete((uri) => {
+            this.outputChannel.appendLine(`[FileWatcher] File deleted: ${uri.fsPath}`);
+        });
+        // Method 2: Watch for document saves (best for auto-linting)
+        const saveWatcher = vscode.workspace.onDidSaveTextDocument(async (document) => {
+            await this.onFileSaved(document);
+        });
+        this.disposables.push(saveWatcher);
+    }
+    /**
+     * Handle file save event - auto-lint the file
+     */
+    async onFileSaved(document) {
+        // Only process certain file types
+        const validExtensions = [".ts", ".js", ".tsx", ".jsx"];
+        const fileExt = document.fileName.substring(document.fileName.lastIndexOf("."));
+        if (!validExtensions.includes(fileExt)) {
+            return; // Skip non-code files
+        }
+        this.outputChannel.appendLine(`[FileWatcher] Auto-linting: ${document.fileName}`);
+        try {
+            const code = document.getText();
+            // Call your Cloudflare worker to lint the code
+            const response = await fetch(this.lintingEndpoint, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code }),
+            });
+            if (!response.ok) {
+                throw new Error(`Linting failed: ${response.status} ${response.statusText}`);
+            }
+            const result = await response.json();
+            // Show results to user
+            if (result.warnings && result.warnings.length > 0) {
+                const message = `⚠️ ${result.warnings.length} issue(s) found in ${path.basename(document.fileName)}`;
+                vscode.window.showWarningMessage(message);
+                this.outputChannel.appendLine(`=== Linting Results for ${document.fileName} ===`);
+                result.warnings.forEach((warning) => {
+                    this.outputChannel.appendLine(`[${warning.severity}] ${warning.message}`);
+                });
+                this.outputChannel.show(true);
+            }
+            else {
+                this.outputChannel.appendLine(`✅ No issues found in ${document.fileName}`);
+            }
+            // If linting produced a fixed version, optionally apply it
+            if (result.linted && result.fixed && result.fixed !== code) {
+                const applyFix = await vscode.window.showInformationMessage("Apply auto-fix?", "Yes", "No");
+                if (applyFix === "Yes") {
+                    await this.applyFix(document, result.fixed);
+                }
+            }
+        }
+        catch (error) {
+            const msg = `[FileWatcher] Linting error: ${error instanceof Error ? error.message : String(error)}`;
+            console.error(msg);
+            this.outputChannel.appendLine(msg);
+        }
+    }
+    /**
+     * Apply the fixed code to the document
+     */
+    async applyFix(document, fixedCode) {
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length));
+        edit.replace(document.uri, fullRange, fixedCode);
+        await vscode.workspace.applyEdit(edit);
+        await document.save();
+        vscode.window.showInformationMessage("✅ Auto-fix applied!");
+    }
+    /**
+     * Stop watching files and clean up
+     */
+    stop() {
+        if (this.watcher) {
+            this.watcher.dispose();
+            this.watcher = null;
+        }
+        this.disposables.forEach((d) => d.dispose());
+        this.disposables = [];
+        this.outputChannel.appendLine("[FileWatcher] Stopped file monitoring");
+        this.outputChannel.dispose();
+    }
+}
+exports.FileWatcher = FileWatcher;
+// Helper for path.basename since we don't import path
+const path = __importStar(__webpack_require__(25));
+
+
+/***/ }),
+/* 29 */
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.GeminiClient = void 0;
+const prompts_1 = __webpack_require__(30);
+class GeminiClient {
+    apiKey = "";
+    model = "gemini-2.5-flash";
+    ready = false;
+    lastRequestTime = 0;
+    minRequestInterval = 2000; // 2 seconds between requests to be safe
+    async initialize(apiKey, model = "gemini-2.5-flash") {
+        this.apiKey = apiKey;
+        this.model = model;
+        this.ready = true;
+    }
+    isReady() {
+        return this.ready;
+    }
+    enableMockMode() {
+        this.model = "mock";
+    }
+    async rateLimit() {
+        const now = Date.now();
+        const timeSinceLast = now - this.lastRequestTime;
+        if (timeSinceLast < this.minRequestInterval) {
+            const wait = this.minRequestInterval - timeSinceLast;
+            await new Promise(resolve => setTimeout(resolve, wait));
+        }
+        this.lastRequestTime = Date.now();
+    }
+    parseJsonFromText(text, fallback) {
+        try {
+            const firstBrace = text.indexOf('{');
+            const lastBrace = text.lastIndexOf('}');
+            if (firstBrace === -1 || lastBrace === -1) {
+                throw new Error("No JSON object found in response");
+            }
+            const jsonStr = text.substring(firstBrace, lastBrace + 1);
+            return JSON.parse(jsonStr);
+        }
+        catch (e) {
+            console.warn("Failed to parse Gemini JSON response:", e);
+            return fallback;
+        }
+    }
+    async runBatch(files, context) {
+        if (!this.ready) {
+            throw new Error("GeminiClient not initialized");
+        }
+        await this.rateLimit();
+        if (this.model === "mock") {
+            return {
+                globalSummary: "Mock batch analysis",
+                files: Array.from(files.keys()).map(f => ({
+                    file: f,
+                    analysis: { issues: [], suggestions: [], risk_level: 'low' },
+                    generatedTests: "// Mock tests",
+                    suggestedFixes: []
+                }))
+            };
+        }
+        const prompt = prompts_1.PromptTemplates.batchProcess(files, context);
+        try {
+            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return this.parseBatchResponse(data);
+        }
+        catch (error) {
+            console.error("Gemini batch analysis failed:", error);
+            throw error;
+        }
+    }
+    parseBatchResponse(data) {
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return this.parseJsonFromText(text, {
+            globalSummary: "Failed to parse AI response",
+            files: []
+        });
+    }
+    async analyzeCode(code, context) {
+        if (!this.ready) {
+            throw new Error("GeminiClient not initialized");
+        }
+        await this.rateLimit();
+        if (this.model === "mock") {
+            return {
+                issues: [
+                    { line: 1, severity: "warning", message: "Mock issue: Variable might be undefined" }
+                ],
+                suggestions: ["Add a null check"],
+                risk_level: "low",
+                summary: "Mock analysis result"
+            };
+        }
+        const prompt = prompts_1.PromptTemplates.codeAnalysis(code, context);
+        try {
+            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return this.parseAnalysis(data);
+        }
+        catch (error) {
+            console.error("Gemini analysis failed:", error);
+            throw error;
+        }
+    }
+    async fetchWithRetry(url, options, retries = 3) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await fetch(url, options);
+                if (response.ok) {
+                    return response;
+                }
+                console.warn(`Gemini API attempt ${i + 1} failed: ${response.status} ${response.statusText}`);
+                // If 429 (Too Many Requests) or 5xx, retry
+                if (response.status === 429 || response.status >= 500) {
+                    const delay = Math.pow(2, i) * 1000; // Exponential backoff
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                }
+                return response;
+            }
+            catch (error) {
+                console.warn(`Gemini API network error attempt ${i + 1}:`, error);
+                if (i === retries - 1) {
+                    throw error;
+                }
+                const delay = Math.pow(2, i) * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        throw new Error("Max retries exceeded");
+    }
+    parseAnalysis(data) {
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const fallback = {
+            issues: [],
+            suggestions: ["Failed to parse AI response. Please try again."],
+            risk_level: 'low',
+            summary: "Error parsing AI response."
+        };
+        const parsed = this.parseJsonFromText(text, fallback);
+        // Ensure structure even if parsed correctly but missing fields
+        return {
+            issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+            suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+            risk_level: parsed.risk_level || 'low',
+            summary: parsed.summary,
+            context_analysis: parsed.context_analysis
+        };
+    }
+    async generateTests(functionCode) {
+        if (!this.ready) {
+            throw new Error("GeminiClient not initialized");
+        }
+        await this.rateLimit();
+        if (this.model === "mock") {
+            return `
+describe('generatedTest', () => {
+  it('should work', () => {
+    expect(true).toBe(true);
+  });
+});`;
+        }
+        const prompt = prompts_1.PromptTemplates.testGeneration(functionCode);
+        try {
+            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            return text;
+        }
+        catch (error) {
+            console.error("Gemini test generation failed:", error);
+            throw error;
+        }
+    }
+    async fixError(code, error) {
+        if (!this.ready) {
+            throw new Error("GeminiClient not initialized");
+        }
+        await this.rateLimit();
+        if (this.model === "mock") {
+            return {
+                fixedCode: code + "\n// Fixed by mock",
+                confidence: 0.9,
+                explanation: "Mock fix applied"
+            };
+        }
+        const prompt = prompts_1.PromptTemplates.errorFix(code, error);
+        try {
+            const response = await this.fetchWithRetry(`https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{ parts: [{ text: prompt }] }]
+                })
+            });
+            if (!response.ok) {
+                throw new Error(`Gemini API error: ${response.statusText}`);
+            }
+            const data = await response.json();
+            const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+            const fallback = {
+                fixedCode: code,
+                confidence: 0,
+                explanation: "Failed to parse fix response"
+            };
+            return this.parseJsonFromText(text, fallback);
+        }
+        catch (error) {
+            console.error("Gemini error fix failed:", error);
+            throw error;
+        }
+    }
+}
+exports.GeminiClient = GeminiClient;
+
+
+/***/ }),
+/* 30 */
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.PromptTemplates = void 0;
+class PromptTemplates {
+    static codeAnalysis(code, context) {
+        const relatedFilesStr = context.relatedFiles.length > 0
+            ? context.relatedFiles.join(", ")
+            : "None";
+        const commitsStr = context.recentCommits.length > 0
+            ? context.recentCommits.join("\n- ")
+            : "None";
+        const errorsStr = context.recentErrors.length > 0
+            ? context.recentErrors.join("\n- ")
+            : "None";
+        return `
+You are an expert AI coding assistant. Your task is to analyze the provided code within the context of the user's current workflow.
+
+CONTEXT:
+- Active File: ${context.activeFile || "Unknown"}
+- Related Open Files: ${relatedFilesStr}
+- Recent Git Commits:
+- ${commitsStr}
+- Recent Workspace Errors:
+- ${errorsStr}
+- Edit Frequency: ${context.editCount} edits in session
+
+GIT DIFF SUMMARY (Recent changes):
+${context.gitDiffSummary}
+
+CODE TO ANALYZE:
+\`\`\`
+${code}
+\`\`\`
+
+INSTRUCTIONS:
+Analyze the code for:
+1.  **Correctness**: Logic errors, bugs, potential runtime issues.
+2.  **Quality**: Code smells, maintainability, readability.
+3.  **Contextual Relevance**: Does this code align with the recent commits and changes?
+4.  **Security**: Potential vulnerabilities.
+
+Respond in valid JSON format ONLY:
+{
+  "issues": [
+    { "line": number, "severity": "error"|"warning"|"info", "message": "string" }
+  ],
+  "suggestions": ["string"],
+  "risk_level": "low"|"medium"|"high",
+  "summary": "Brief summary of what the user seems to be working on based on this code and context",
+  "context_analysis": "Analysis of how this code fits into the broader project context"
+}
+    `.trim();
+    }
+    static testGeneration(functionCode) {
+        return `
+Generate comprehensive unit tests for the following function using Vitest.
+Include imports, describe blocks, and it blocks covering happy paths and edge cases.
+
+Code:
+\`\`\`
+${functionCode}
+\`\`\`
+    `.trim();
+    }
+    static batchProcess(files, context) {
+        const fileList = Array.from(files.entries()).map(([name, content]) => `
+--- FILE: ${name} ---
+${content}
+---------------------
+`).join("\n");
+        const commitsStr = context.recentCommits.length > 0
+            ? context.recentCommits.join("\n- ")
+            : "None";
+        return `
+You are an expert AI coding assistant. Perform a deep, batched analysis on the following files.
+
+CONTEXT:
+- Recent Git Commits:
+- ${commitsStr}
+- Git Diff Summary:
+${context.gitDiffSummary}
+
+FILES TO PROCESS:
+${fileList}
+
+INSTRUCTIONS:
+For EACH file provided above, perform the following:
+1.  **Analyze**: Find bugs, logic errors, and code smells.
+2.  **Generate Tests**: Create a comprehensive unit test suite (Vitest) for the file.
+3.  **Suggest Fixes**: For any "error" or "high" severity issue found, provide a corrected code snippet.
+
+Respond in valid JSON format ONLY with this structure:
+{
+  "globalSummary": "Overview of the changes and health of these files",
+  "files": [
+    {
+      "file": "filename",
+      "analysis": {
+        "issues": [ { "line": number, "severity": "error"|"warning"|"info", "message": "string" } ],
+        "suggestions": ["string"],
+        "risk_level": "low"|"medium"|"high",
+        "summary": "File specific summary"
+      },
+      "generatedTests": "string (full test file content)",
+      "suggestedFixes": [
+        {
+          "issueId": "issue-index (0, 1, etc)",
+          "fix": { "fixedCode": "string", "confidence": number, "explanation": "string" }
+        }
+      ]
+    }
+  ]
+}
+    `.trim();
+    }
+    static errorFix(code, error) {
+        return `
+Fix the following error in the code.
+
+Error:
+${error}
+
+Code:
+\`\`\`
+${code}
+\`\`\`
+
+INSTRUCTIONS:
+Analyze the error and the code. Provide a corrected version of the code.
+Respond in valid JSON format ONLY:
+{
+  "fixedCode": "string (the complete fixed code)",
+  "confidence": number (0.0 to 1.0),
+  "explanation": "string (brief explanation of the fix)"
+}
+    `.trim();
+    }
+}
+exports.PromptTemplates = PromptTemplates;
+
+
+/***/ }),
+/* 31 */
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ContextBuilder = void 0;
+class ContextBuilder {
+    static build(raw) {
+        const { gitLogs = [], gitDiff = "", openFiles = [], activeFile = null, errors = [], editHistory = [], fileContents = new Map() } = raw;
+        // 1. Identify related files based on active file
+        // Simple heuristic: same directory or imported (mock logic for imports)
+        const relatedFiles = openFiles.filter(f => f !== activeFile);
+        // 2. Summarize Git Diff (don't just truncate, maybe prioritize modified files)
+        let diffSummary = gitDiff || "";
+        if (diffSummary.length > 8000) {
+            diffSummary = diffSummary.substring(0, 8000) + "\n... [truncated]";
+        }
+        // 3. Build open file contents map for context
+        const openFileContents = new Map();
+        if (activeFile && fileContents.has(activeFile)) {
+            openFileContents.set(activeFile, fileContents.get(activeFile));
+        }
+        // Add other open files if small enough? For now just active.
+        return {
+            activeFile: activeFile || null,
+            recentCommits: gitLogs.slice(0, 10), // Increased context
+            recentErrors: errors.slice(0, 5),
+            gitDiffSummary: diffSummary,
+            editCount: editHistory.length,
+            relatedFiles: relatedFiles,
+            openFileContents: openFileContents
+        };
+    }
+}
+exports.ContextBuilder = ContextBuilder;
+
+
+/***/ }),
 /* 32 */
 /***/ (function(__unused_webpack_module, exports, __webpack_require__) {
 
@@ -3604,7 +3622,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.LintingService = void 0;
 const vscode = __importStar(__webpack_require__(1));
-const events_1 = __webpack_require__(20);
+const events_1 = __webpack_require__(19);
 const linting_1 = __webpack_require__(33);
 /**
  * LintingService manages VS Code diagnostics and triggers linting

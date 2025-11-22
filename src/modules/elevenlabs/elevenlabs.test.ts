@@ -1,9 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ElevenLabsService } from './elevenlabs';
+import { spawn } from 'child_process';
 
 // Mock fetch globally
 const fetchMock = vi.fn();
 global.fetch = fetchMock;
+
+// Mock child_process spawn
+vi.mock('child_process', () => ({
+  spawn: vi.fn()
+}));
 
 describe('ElevenLabsService', () => {
   let service: ElevenLabsService;
@@ -16,6 +22,14 @@ describe('ElevenLabsService', () => {
       ok: true,
       arrayBuffer: async () => new ArrayBuffer(10),
     });
+    
+    // Mock spawn for checkPlayerAvailability (linux check)
+    (spawn as any).mockReturnValue({
+      on: (event: string, cb: any) => {
+        if (event === 'close') cb(0); // success
+      }
+    });
+
     // Mock playAudio to avoid actual file I/O and playback
     vi.spyOn(service as any, 'playAudio').mockResolvedValue(undefined);
   });
@@ -58,9 +72,6 @@ describe('ElevenLabsService', () => {
 
     // The initialize call also calls speak('Test'), so total calls = 1 (init) + 3 (messages) = 4
     expect(playAudioSpy).toHaveBeenCalledTimes(4);
-    // Verify order of execution is preserved by the queue
-    // Note: In a real unit test for queue, we might check timestamps or call order more strictly.
-    // Since we await Promise.all, we just ensure all were called.
   });
 
   it('should handle API errors gracefully without crashing queue', async () => {
@@ -84,5 +95,16 @@ describe('ElevenLabsService', () => {
     // Second message should still process (mocked success in beforeEach)
     // Total fetch calls: 1 (init) + 1 (fail) + 1 (success) = 3
     expect(fetchMock).toHaveBeenCalledTimes(3); 
+  });
+
+  it('should clear queue', async () => {
+    await service.initialize('test-key');
+    service.speak('Message 1');
+    service.speak('Message 2');
+    service.clearQueue();
+    // Since speak is async and pushes to queue then calls processQueue, 
+    // it's hard to guarantee queue is cleared before processing starts for the first item.
+    // But we can check if the queue is empty.
+    expect((service as any).queue.length).toBe(0);
   });
 });
