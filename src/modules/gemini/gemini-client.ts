@@ -1,14 +1,17 @@
 import { GeminiModule } from './index';
 import { PromptTemplates } from './prompts';
-import { GeminiContext, Analysis, CodeFix } from './types';
+import { GeminiContext, Analysis, CodeFix, BatchAnalysisResult } from './types';
 
 export class GeminiClient implements GeminiModule {
   private apiKey: string = "";
-  private model: string = "gemini-2.0-flash";
+  private model: string = "gemini-2.5-flash";
   private ready = false;
+  private lastRequestTime = 0;
+  private minRequestInterval = 2000; // 2 seconds between requests to be safe
 
   async initialize(apiKey: string): Promise<void> {
     this.apiKey = apiKey;
+    this.model = "gemini-2.5-flash"; // Reset to default model
     this.ready = true;
   }
 
@@ -20,10 +23,86 @@ export class GeminiClient implements GeminiModule {
     this.model = "mock";
   }
 
+  private async rateLimit() {
+    const now = Date.now();
+    const timeSinceLast = now - this.lastRequestTime;
+    if (timeSinceLast < this.minRequestInterval) {
+      const wait = this.minRequestInterval - timeSinceLast;
+      await new Promise(resolve => setTimeout(resolve, wait));
+    }
+    this.lastRequestTime = Date.now();
+  }
+
+  async runBatch(files: Map<string, string>, context: GeminiContext): Promise<BatchAnalysisResult> {
+    if (!this.ready) { throw new Error("GeminiClient not initialized"); }
+    
+    await this.rateLimit();
+
+    if (this.model === "mock") {
+      return {
+        globalSummary: "Mock batch analysis",
+        files: Array.from(files.keys()).map(f => ({
+          file: f,
+          analysis: { issues: [], suggestions: [], risk_level: 'low' },
+          generatedTests: "// Mock tests",
+          suggestedFixes: []
+        }))
+      };
+    }
+
+    const prompt = PromptTemplates.batchProcess(files, context);
+
+    try {
+      const response = await this.fetchWithRetry(
+        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }]
+          })
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Gemini API error: ${response.statusText}`);
+      }
+
+      const data = await response.json() as any;
+      return this.parseBatchResponse(data);
+    } catch (error) {
+      console.error("Gemini batch analysis failed:", error);
+      throw error;
+    }
+  }
+
+  private parseBatchResponse(data: any): BatchAnalysisResult {
+    try {
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      const firstBrace = text.indexOf('{');
+      const lastBrace = text.lastIndexOf('}');
+      
+      if (firstBrace === -1 || lastBrace === -1) {
+        throw new Error("No JSON object found in response");
+      }
+      
+      const jsonStr = text.substring(firstBrace, lastBrace + 1);
+      return JSON.parse(jsonStr) as BatchAnalysisResult;
+    } catch (e) {
+      console.warn("Failed to parse Gemini batch response:", e);
+      return {
+        globalSummary: "Failed to parse AI response",
+        files: []
+      };
+    }
+  }
+
   async analyzeCode(code: string, context: GeminiContext): Promise<Analysis> {
     if (!this.ready) {
       throw new Error("GeminiClient not initialized");
     }
+    
+    await this.rateLimit();
 
     if (this.model === "mock") {
       return {

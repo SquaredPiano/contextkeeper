@@ -33,6 +33,21 @@ export interface CodeFix {
   explanation?: string;
 }
 
+export interface BatchFileResult {
+  file: string;
+  analysis: Analysis;
+  generatedTests?: string;
+  suggestedFixes?: Array<{
+    issueId: string; // correlates to an issue in analysis
+    fix: CodeFix;
+  }>;
+}
+
+export interface BatchAnalysisResult {
+  files: BatchFileResult[];
+  globalSummary: string;
+}
+
 export interface RawLogInput {
   gitLogs?: string[];
   gitDiff?: string;
