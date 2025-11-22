@@ -60,6 +60,12 @@
         "icon": "$(settings-gear)"
       },
       {
+        "command": "copilot.toggleElevenVoice",
+        "title": "Toggle ElevenLabs Voice",
+        "category": "Copilot",
+        "icon": "$(megaphone)"
+      },
+      {
         "command": "copilot.showPanel",
         "title": "Show Dashboard",
         "category": "Copilot",
@@ -138,6 +144,11 @@
           "type": "boolean",
           "default": true,
           "description": "Enable voice notifications"
+        },
+        "copilot.voice.elevenEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable ElevenLabs voice playback (if API key configured)"
         },
         "copilot.analysis.autoRun": {
           "type": "boolean",

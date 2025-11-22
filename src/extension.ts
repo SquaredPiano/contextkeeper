@@ -61,7 +61,8 @@ let autonomousAgent: AutonomousAgent;
 
 // State
 let currentContext: DeveloperContext | null = null;
-let isAutonomousMode = false;
+let currentAnalysis: AIAnalysis | null = null;
+// autonomous mode is enforced by design; UI toggle removed
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -141,14 +142,30 @@ export async function activate(context: vscode.ExtensionContext) {
       issuesTreeProvider
     );
 
-    sidebarProvider = new SidebarWebviewProvider(
-      context.extensionUri,
-      handleWebviewMessage
-    );
-    const webviewProvider = vscode.window.registerWebviewViewProvider(
-      'copilot.mainView',
-      sidebarProvider
-    );
+  sidebarProvider = new SidebarWebviewProvider(
+    context.extensionUri,
+    handleWebviewMessage
+  );
+  const webviewProvider = vscode.window.registerWebviewViewProvider(
+    'copilot.mainView',
+    sidebarProvider
+  );
+
+  // Send initial ElevenLabs voice state to the webview so UI reflects settings
+  try {
+    const config = vscode.workspace.getConfiguration('copilot');
+    // Ensure sound is enabled when the extension starts
+    config.update('voice.elevenEnabled', true, true).then(() => {}, () => {});
+    try {
+      if (voiceService && (voiceService as any).setEnabled) {
+        (voiceService as any).setEnabled(true);
+      }
+    } catch (e) {}
+    // send initial UI state (cast to any since webview message union is limited)
+    (sidebarProvider as any).postMessage({ type: 'elevenVoiceState', enabled: true });
+  } catch (e) {
+    // ignore if webview not ready
+  }
 
     // Set up service event listeners
     setupServiceListeners();
@@ -176,6 +193,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Load autonomous mode from settings
     isAutonomousMode = config.get('autonomous.enabled', false);
+  // Note: autonomous mode is always ON; no UI toggle required
+    const config = vscode.workspace.getConfiguration('copilot');
 
     // Show welcome notification
     NotificationManager.showSuccess(
@@ -251,6 +270,12 @@ function setupServiceListeners() {
   contextService.on('contextCollected', (context: DeveloperContext) => {
     currentContext = context;
     sidebarProvider.updateContext(context);
+    // Update the status bar with fresh developer context
+    try {
+      statusBar.updateContext(context);
+    } catch (e) {
+      // ignore if status bar not available
+    }
   });
 
   // Listen to AI service events
@@ -319,18 +344,26 @@ function _registerCommands(context: vscode.ExtensionContext) {
     })
   );
 
-  // Toggle autonomous mode
-  context.subscriptions.push(
-    vscode.commands.registerCommand('copilot.toggleAutonomous', async () => {
-      isAutonomousMode = !isAutonomousMode;
-      const config = vscode.workspace.getConfiguration('copilot');
-      await config.update('autonomous.enabled', isAutonomousMode, true);
+  // Autonomous mode is always enabled; UI toggle removed.
 
-      if (isAutonomousMode) {
-        NotificationManager.showAutonomousStarted();
-      } else {
-        NotificationManager.showSuccess('Autonomous mode disabled');
+  // Toggle ElevenLabs voice playback
+  context.subscriptions.push(
+    vscode.commands.registerCommand('copilot.toggleElevenVoice', async () => {
+      const config = vscode.workspace.getConfiguration('copilot');
+      const current = config.get<boolean>('voice.elevenEnabled', true);
+      const next = !current;
+      await config.update('voice.elevenEnabled', next, true);
+
+      // If the runtime voice service exposes `setEnabled`, update it too
+      try {
+        if (voiceService && (voiceService as any).setEnabled) {
+          (voiceService as any).setEnabled(next);
+        }
+      } catch (e) {
+        // ignore
       }
+
+      vscode.window.showInformationMessage(`ElevenLabs voice ${next ? 'enabled' : 'disabled'}`);
     })
   );
 
@@ -391,9 +424,7 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       await runAnalysis();
       break;
 
-    case 'toggleAutonomous':
-      await vscode.commands.executeCommand('copilot.toggleAutonomous');
-      break;
+    
 
     case 'navigateToIssue':
       await vscode.commands.executeCommand(
@@ -410,6 +441,28 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
     case 'dismissIssue':
       // Future: implement issue dismissal
       break;
+  }
+
+  // Handle non-typed UI messages (from webview) like sound toggles
+  const m = (message as any);
+  if (m && m.type) {
+    if (m.type === 'setElevenVoice') {
+      try {
+        const cfg = vscode.workspace.getConfiguration('copilot');
+        cfg.update('voice.elevenEnabled', Boolean(m.enabled), true).then(() => {}, () => {});
+        try { if (voiceService && (voiceService as any).setEnabled) (voiceService as any).setEnabled(Boolean(m.enabled)); } catch (e) {}
+        vscode.window.showInformationMessage(`Sound ${m.enabled ? 'enabled' : 'disabled'}`);
+      } catch (e) {}
+    }
+
+    if (m.type === 'ensureSoundOn') {
+      try {
+        const cfg = vscode.workspace.getConfiguration('copilot');
+        cfg.update('voice.elevenEnabled', true, true).then(() => {}, () => {});
+        try { if (voiceService && (voiceService as any).setEnabled) (voiceService as any).setEnabled(true); } catch (e) {}
+        (sidebarProvider as any).postMessage({ type: 'elevenVoiceState', enabled: true });
+      } catch (e) {}
+    }
   }
 }
 
