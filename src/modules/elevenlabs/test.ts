@@ -1,3 +1,4 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ElevenLabsService } from './elevenlabs';
 
 describe('ElevenLabsService', () => {
@@ -9,7 +10,7 @@ describe('ElevenLabsService', () => {
 
   it('should fall back to console on API failure', async () => {
     const service = new ElevenLabsService();
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     await service.initialize(''); // no key -> fallback
     await service.speak('Test message');

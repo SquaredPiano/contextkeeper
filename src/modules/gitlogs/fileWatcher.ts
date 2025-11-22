@@ -92,7 +92,7 @@ export class FileWatcher {
         throw new Error(`Linting failed: ${response.statusText}`);
       }
 
-      const result = await response.json();
+      const result: any = await response.json();
 
       // Show results to user
       if (result.warnings && result.warnings.length > 0) {
