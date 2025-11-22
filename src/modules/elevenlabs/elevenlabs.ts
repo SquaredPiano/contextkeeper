@@ -85,17 +85,20 @@ export class ElevenLabsService implements IVoiceService {
     if (platform === 'darwin') {
       command = `afplay "${filePath}"`;
     } else if (platform === 'win32') {
-      command = `start "${filePath}"`; // Or powershell
+      // Use PowerShell to play audio on Windows without external dependencies
+      command = `powershell -c (New-Object Media.SoundPlayer "${filePath}").PlaySync()`;
     } else {
-      command = `aplay "${filePath}"`; // Linux
+      command = `aplay "${filePath}"`; // Linux (requires alsa-utils)
     }
 
     exec(command, (error) => {
       if (error) {
         console.error(`Failed to play audio: ${error.message}`);
       } else {
-        // Clean up file after playing (optional, maybe keep for debug)
-        // fs.unlinkSync(filePath); 
+        // Clean up file after playing
+        fs.unlink(filePath, (err) => {
+            if (err) console.error('Failed to delete temp audio file:', err);
+        }); 
       }
     });
   }

@@ -211,6 +211,10 @@ export function activate(context: vscode.ExtensionContext) {
         // Only run if not already running
         // We can check agent state if we expose it, or just fire and let it handle concurrency
         await agent.startSession('auto-lint');
+        
+        if (voiceService && voiceService.isEnabled()) {
+            voiceService.speak("I've completed a scheduled autonomous check.", 'casual');
+        }
       } catch (error) {
         console.error('Scheduled task failed:', error);
       }

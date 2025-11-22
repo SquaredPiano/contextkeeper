@@ -1,53 +1,93 @@
-# CONTEXT.md
+# System Architecture & Context
 
-## Preface
-Okay, future me. You're reading this six months from now, probably wondering why the hell I built things this way. It wasn't just caffeine and panic (though there was plenty of both). Here's the *real* reasoning behind the architecture of the Autonomous Copilot.
+## 1. High-Level Overview
+**ContextKeeper** is an autonomous coding assistant designed to operate within the VS Code environment. Unlike traditional "autocomplete" copilots, ContextKeeper functions as an active collaborator that maintains a persistent understanding of the development session.
 
----
+The system is architected around a **Hybrid Compute Model**, balancing local responsiveness (VS Code Extension Host) with remote capability (Cloudflare Workers, Gemini 1.5 Pro).
 
-## 1. The Core Philosophy: "Thin Path" First
-I didn't want to build a perfect system that does nothing. I wanted a messy system that does *everything*—end-to-end. That's why you'll see some "ugly" code in `extension.ts` or hardcoded fallbacks. The goal was to prove the loop: **Context -> AI -> Action -> Context**. If that loop works, we can refine the components later. If it doesn't, no amount of clean code matters.
-
-## 2. `extension.ts`: The messy switchboard
-**Why it's a mess:** This file is the integration point. It's where VS Code's event loop meets our services.
-- **`activate()`**: It's massive because dependency injection in VS Code extensions is a pain. I manually wire everything here (`SessionManager`, `ContextService`, `AutonomousAgent`) so I can swap mocks for real services easily.
-- **`setupServiceListeners()`**: Instead of services calling UI directly (coupling), they emit events. The extension listens and updates the UI. This keeps the logic decoupled from the view.
-- **The Scheduler**: I used a simple `setInterval` for the autonomous loop. Why? because `cron` libraries are heavy and I just needed a "heartbeat" to wake the agent up.
-
-## 3. `SessionManager.ts`: The Anchor
-**Reasoning:** Initially, I hardcoded the session ID. Bad idea. The AI needs to know *when* a session starts and stops to group context meaningfully.
-- **`initialize()`**: It checks if a session exists or creates a new one. It persists this to LanceDB so if you reload the window, the AI remembers "Oh, we were working on the Auth feature".
-- **`getSessionId()`**: The single source of truth. If this returns null, nothing else should work.
-
-## 4. `ContextIngestionService.ts`: The Firehose
-**Reasoning:** Developers generate a ton of noise. We need to filter it.
-- **`handleFileEdit`**: I don't save every keystroke. I debounce it. Why? Because sending 1000 "I typed 'a'" events to the DB is expensive and useless. I only care when you pause or save.
-- **`collectContext`**: This aggregates Git, File, and Cursor context into a single `DeveloperContext` object. This object is the "prompt" for the AI. If it's not in here, the AI doesn't know about it.
-
-## 5. `AutonomousAgent.ts`: The "Intern"
-**Reasoning:** This is the cool part. It's an agent that runs *alongside* you.
-- **`startSession`**: It creates a new "job".
-- **`proposeAction`**: This is the brain. It looks at the context and asks Gemini "What should I do?". It decides between `auto-lint` (boring maintenance) or `fix-issues` (active help).
-- **`runAutoFix`**: This is the "hand". It takes the AI's suggestion and applies it to the editor. I used `WorkspaceEdit` because it's undoable by the user. Never touch the file system directly if you can avoid it.
-
-## 6. `GeminiService.ts`: The Brain
-**Reasoning:** I wrapped the Google Generative AI API.
-- **`fixError`**: It constructs a very specific prompt: "Return ONLY the fixed code". LLMs love to chat. I don't want chat. I want code.
-- **`analyze`**: It asks for a JSON response. Parsing text is fragile. JSON is robust (mostly).
-
-## 7. `LanceDBStorage.ts`: The Memory
-**Reasoning:** Vector DBs are overkill for simple logs, but essential for *retrieval*.
-- **`createSession`**: It stores metadata.
-- **`addEmbedding`**: This is for the future. When we want to ask "How did I fix this bug last time?", we'll search these vectors.
-
-## 8. `CloudflareService.ts`: The Offloader
-**Reasoning:** Running heavy linting or analysis in the VS Code process slows down the editor.
-- **`lintCode`**: I send the code to a Cloudflare Worker. It processes it and returns issues. This keeps the extension lightweight. If the network fails, it falls back to a local mock (because offline support matters).
+### Core Data Flow
+```mermaid
+[VS Code Events] -> [Ingestion Service] -> [Vector Store (LanceDB)]
+                                      |
+                                      v
+[User/Timer] -> [Orchestrator] -> [Context Builder] -> [Hybrid Analysis] -> [Action Execution]
+```
 
 ---
 
-## Final Note
-If you're refactoring this, keep the **Event-Driven** nature. Don't let services talk to each other directly if you can avoid it. Let them emit events and let `extension.ts` or a Mediator handle the flow. And please, for the love of code, keep the `CONTEXT.md` updated.
+## 2. Architectural Principles
 
-Good luck,
-Past You (Vishnu)
+### 2.1. The "Thin Path" & End-to-End Latency
+The architecture prioritizes the speed of the "Context-to-Action" loop. We avoid heavy local processing.
+*   **Ingestion**: Asynchronous and non-blocking.
+*   **Analysis**: Offloaded to Cloudflare (Linting) and Gemini (Reasoning).
+*   **Execution**: Local `WorkspaceEdit` operations for atomicity and undo support.
+
+### 2.2. Safety & Verification
+Autonomous agents must be trustworthy. We implement a **"Trust but Verify"** strategy:
+1.  **Deterministic Guardrails**: Static analysis (Cloudflare/ESLint) runs *before* and *alongside* probabilistic AI models.
+2.  **Sandboxed Execution**: Autonomous changes are applied to dedicated `copilot/*` git branches, never directly to `main`.
+3.  **Human-in-the-Loop**: High-risk changes (detected by heuristic analysis) require explicit user approval via the `prompt` action type.
+
+### 2.3. State Persistence
+Context is temporal. The `SessionManager` maintains a session ID that links ephemeral IDE events (scrolls, edits) with persistent vector embeddings. This allows the system to recover context after a window reload.
+
+---
+
+## 3. Component Deep Dive
+
+### 3.1. Composition Root (`extension.ts`)
+*   **Role**: Handles the VS Code Extension Lifecycle and Dependency Injection.
+*   **Design**: Acts as the "Switchboard". It instantiates services based on configuration (Real vs. Mock) and wires event listeners.
+*   **Constraint**: Currently monolithic to simplify shared state management. Future refactoring should introduce a proper DI container if service complexity grows.
+
+### 3.2. The Ingestion Layer (`ContextIngestionService.ts`)
+*   **Role**: Filters and normalizes the "Firehose" of IDE events.
+*   **Key Logic**:
+    *   **Debouncing**: `onDidChangeTextDocument` events are debounced (2s) to capture "thought pauses" rather than keystrokes.
+    *   **Vectorization**: Significant events are queued for embedding into LanceDB via `IngestionQueue`, ensuring the UI thread remains unblocked.
+    *   **Git Awareness**: Listens to local git operations to understand external context changes.
+
+### 3.3. The Orchestrator (`Orchestrator.ts`)
+*   **Role**: The central decision engine for analysis and action.
+*   **Key Logic**:
+    *   **Context Selection**: Dynamically assembles the prompt context (`CollectedContext`) based on the active task. It does *not* dump the entire repo into the context window.
+    *   **Batch Processing**: Aggregates file analysis requests to minimize network round-trips to the AI provider.
+    *   **Smart Override**: Implements the logic to upgrade `prompt` actions to `auto-fix` if the AI's confidence and risk assessment meet strict criteria (Low Risk + High Confidence).
+
+### 3.4. The Autonomous Agent (`AutonomousAgent.ts`)
+*   **Role**: A state machine that executes multi-step tasks.
+*   **Workflow**:
+    1.  **Plan**: Queries Gemini for a high-level plan based on the current `DeveloperContext`.
+    2.  **Isolate**: Creates a temporary git branch.
+    3.  **Execute**: Runs the `Orchestrator` pipeline or specific tasks (`auto-lint`, `generate-tests`).
+    4.  **Commit**: Commits changes with semantic messages.
+
+### 3.5. External Services
+*   **Cloudflare Service**: specialized for low-latency, deterministic code analysis (Linting, AST parsing).
+*   **Gemini Service**: specialized for high-latency, probabilistic reasoning and code generation. Enforces JSON output schemas for reliability.
+
+---
+
+## 4. Technical Debt & Known Constraints
+
+### 4.1. Context Window Management
+*   **Current State**: We rely on heuristic selection (Active File + Open Tabs + Recent Git Diff).
+*   **Limitation**: This may miss relevant context in "spooky action at a distance" scenarios (e.g., changing an interface affecting a distant consumer).
+*   **Future Mitigation**: Implement RAG (Retrieval-Augmented Generation) using the LanceDB vector store to pull semantically relevant files.
+
+### 4.2. Extension Host Performance
+*   **Current State**: Heavy reliance on `setInterval` for the autonomous heartbeat.
+*   **Limitation**: Can potentially impact battery life or performance if the interval is too aggressive.
+*   **Future Mitigation**: Move the heartbeat to a dedicated worker thread or rely strictly on event-driven triggers.
+
+### 4.3. Error Handling Strategy
+*   **Current State**: "Fail Open". If the AI fails, we fall back to standard linting.
+*   **Requirement**: Ensure UI feedback clearly distinguishes between "AI is thinking", "AI failed", and "No issues found".
+
+---
+
+## 5. Developer Guidelines
+*   **Do not block the UI thread.** All I/O and heavy computation must be async or offloaded.
+*   **Prefer `WorkspaceEdit`.** Never use `fs` module for code modification. VS Code's edit API ensures atomicity and undo stack integration.
+*   **Keep `CONTEXT.md` updated.** This file is the source of truth for architectural intent. If you change the data flow, update the diagram.
