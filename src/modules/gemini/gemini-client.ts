@@ -1,7 +1,6 @@
 import { GoogleGenerativeAI, GenerativeModel } from '@google/generative-ai';
-import { GeminiModule } from './index';
 import { PromptTemplates } from './prompts';
-import { GeminiContext, Analysis, CodeFix, BatchAnalysisResult } from './types';
+import { GeminiContext, Analysis, CodeFix, BatchAnalysisResult, GeminiModule } from './types';
 import { parseJsonFromText } from './utils';
 
 export class GeminiClient implements GeminiModule {

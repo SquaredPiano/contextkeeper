@@ -62,3 +62,15 @@ export interface RawLogInput {
   projectStructure?: string;
   dependencies?: string[];
 }
+
+export interface GeminiModule {
+  initialize(apiKey: string, modelName?: string): Promise<void>;
+
+  analyzeCode(code: string, context: GeminiContext): Promise<Analysis>;
+  generateTests(code: string): Promise<string>;
+  fixError(code: string, error: string): Promise<CodeFix>;
+  getEmbedding(text: string): Promise<number[]>;
+
+  isReady(): boolean;
+  enableMockMode(): void;
+}

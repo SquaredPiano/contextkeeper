@@ -4,6 +4,26 @@ AI-powered autonomous code analysis for VSCode. Built with a **frontend-first ar
 
 ## ⚡ Quick Start
 
+### Run Demos (CLI)
+
+**See all available demos:**
+```bash
+npm run demo
+```
+
+**Run specific demos:**
+```bash
+npm run demo:gemini      # AI code analysis
+npm run demo:voice       # Voice synthesis
+npm run demo:git         # Git logs tracking
+npm run demo:orchestrator # Full pipeline
+npm run demo:idle        # Idle detection
+```
+
+**For full demo guide:** See [DEMO_SETUP.md](./DEMO_SETUP.md)
+
+### Run Extension (VSCode)
+
 **Try it now (2 minutes):**
 
 ```bash
@@ -216,6 +236,29 @@ Press F5 and verify real data flows through the UI!
 ---
 
 ## 🎬 Demo
+
+### Quick CLI Demos
+
+Run module demos from the command line:
+
+```bash
+# Show demo menu
+npm run demo
+
+# Run specific demos
+npm run demo:gemini       # AI code analysis demo
+npm run demo:voice        # Voice synthesis demo
+npm run demo:git          # Git logs demo
+npm run demo:orchestrator # Full pipeline demo
+npm run demo:idle         # Idle detection demo
+
+# Run all demos
+npm run demo:all
+```
+
+**📚 Full Demo Guide:** [DEMO_SETUP.md](./DEMO_SETUP.md)
+
+### VSCode Extension Demo
 
 Press **F5** to launch the extension in debug mode. You'll see:
 
