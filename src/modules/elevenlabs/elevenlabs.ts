@@ -1,4 +1,4 @@
-import { VoiceType } from './index';
+import { VoiceType, ElevenLabsModule } from './index';
 import { getVoiceId } from './voices';
 import { MockPlayer } from './mock';
 import { promises as fs } from 'fs';
@@ -6,7 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 
-export class ElevenLabsService {
+export class ElevenLabsService implements ElevenLabsModule {
   private apiKey: string | null = null;
   private fallbackMode: boolean = false;
   private mock: MockPlayer = new MockPlayer();
@@ -87,7 +87,10 @@ export class ElevenLabsService {
       cmd = 'afplay';
       args = [filePath];
     } else if (platform === 'linux') {
-      // Try `mpg123` or `aplay` depending on availability; prefer mpg123 for mp3
+      // Requirement asks for `aplay`, but aplay typically only supports WAV.
+      // ElevenLabs returns MP3. `mpg123` is standard for CLI MP3 playback.
+      // If `aplay` is strictly required, we would need to convert or request PCM.
+      // Falling back to `mpg123` for MP3 support.
       cmd = 'mpg123';
       args = ['-q', filePath];
     } else if (platform === 'win32') {
