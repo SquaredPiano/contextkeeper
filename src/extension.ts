@@ -209,11 +209,6 @@ export async function activate(context: vscode.ExtensionContext) {
       lintingService,
     );
 
-    // Load autonomous mode from settings
-    isAutonomousMode = config.get('autonomous.enabled', false);
-  // Note: autonomous mode is always ON; no UI toggle required
-    const config = vscode.workspace.getConfiguration('copilot');
-
     // Show welcome notification
     NotificationManager.showSuccess(
       'Autonomous Copilot is ready!',

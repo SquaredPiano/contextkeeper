@@ -7,7 +7,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { dashboardHtml } from './webview/dashboard';
 import {
 	DeveloperContext,
 	AIAnalysis,
@@ -26,7 +25,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
 
 	resolveWebviewView(
 		webviewView: vscode.WebviewView,
-		context: vscode.WebviewViewResolveContext,
+		_context: vscode.WebviewViewResolveContext,
 		_token: vscode.CancellationToken
 	): void | Thenable<void> {
 		this._view = webviewView;
@@ -102,7 +101,36 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private getHtmlContent(webview: vscode.Webview): string {
-		return dashboardHtml;
+	private getHtmlContent(_webview: vscode.Webview): string {
+		// Load the actual dashboard.html file from the webview directory
+		const htmlPath = path.join(
+			this.extensionUri.fsPath,
+			'src',
+			'ui',
+			'webview',
+			'dashboard.html'
+		);
+
+		try {
+			const htmlContent = fs.readFileSync(htmlPath, 'utf8');
+			return htmlContent;
+		} catch (error) {
+			console.error('Failed to load dashboard.html:', error);
+			// Fallback to a simple error message
+			return `
+				<!DOCTYPE html>
+				<html>
+				<head>
+					<meta charset="UTF-8">
+					<title>Error</title>
+				</head>
+				<body>
+					<h1>Failed to load dashboard</h1>
+					<p>Could not find dashboard.html at: ${htmlPath}</p>
+					<p>Error: ${error}</p>
+				</body>
+				</html>
+			`;
+		}
 	}
 }

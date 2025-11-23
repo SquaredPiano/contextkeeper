@@ -6,21 +6,24 @@ import { promises as fs } from 'fs';
 import * as os from 'os';
 import { IVoiceService } from '../../services/interfaces';
 import fetch from 'node-fetch';
-import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { exec } from 'child_process';
 
 export class ElevenLabsService implements IVoiceService {
   private apiKey: string | undefined;
   private initialized: boolean = false;
   private voiceId: string = 'JBFqnCBsd6RMkjVDRZzb'; // Example Voice ID (George)
+  private mock: MockPlayer;
+  private fallbackMode: boolean = false;
 
-  constructor() { }
+  constructor() {
+    this.mock = new MockPlayer();
+  }
 
   initialize(apiKey: string) {
     if (!apiKey) {
       console.warn('ElevenLabsService: No API key provided.');
+      this.fallbackMode = true;
       return;
     }
     this.apiKey = apiKey;
@@ -38,28 +41,20 @@ export class ElevenLabsService implements IVoiceService {
   }
 
   isEnabled(): boolean {
-    return this.initialized;
+    return this.initialized || this.fallbackMode;
   }
 
   async speak(text: string, voiceStyle?: 'casual' | 'professional' | 'encouraging'): Promise<void> {
-    if (!this.initialized || !this.apiKey) {
+    if (!this.initialized && !this.fallbackMode) {
       console.warn('ElevenLabsService not initialized, skipping speech.');
       return;
     }
 
     try {
-      await this.performSpeak(item.text, item.voice);
-      item.resolve();
+      const voice: VoiceType = voiceStyle || 'casual';
+      await this.performSpeak(text, voice);
     } catch (error) {
-      console.error(`Error speaking "${item.text}":`, error);
-      // Don't reject the promise to avoid unhandled rejections crashing the extension,
-      // just log it. Or we could reject if the caller wants to handle it.
-      // For now, let's resolve so the queue continues.
-      item.resolve(); 
-    } finally {
-      this.isProcessing = false;
-      // Process next item
-      this.processQueue();
+      console.error(`Error speaking "${text}":`, error);
     }
   }
 
@@ -113,8 +108,7 @@ export class ElevenLabsService implements IVoiceService {
     console.log(`[Audio] Playing ${fileName}...`);
 
     const platform = process.platform;
-    let cmd: string;
-    let args: string[] = [];
+    let command: string;
 
     if (platform === 'darwin') {
       command = `afplay "${filePath}"`;
@@ -125,14 +119,16 @@ export class ElevenLabsService implements IVoiceService {
       command = `aplay "${filePath}"`; // Linux (requires alsa-utils)
     }
 
-    exec(command, (error) => {
+    exec(command, async (error) => {
       if (error) {
         console.error(`Failed to play audio: ${error.message}`);
       } else {
         // Clean up file after playing
-        fs.unlink(filePath, (err) => {
-            if (err) console.error('Failed to delete temp audio file:', err);
-        }); 
+        try {
+          await fs.unlink(filePath);
+        } catch (err) {
+          console.error('Failed to delete temp audio file:', err);
+        }
       }
     });
   }
