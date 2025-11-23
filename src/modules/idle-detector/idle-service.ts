@@ -29,6 +29,7 @@ export class IdleService implements IIdleService {
     private isHandlingIdle: boolean = false; // Prevent duplicate handling
     private uiUpdateCallback?: (result: IdleImprovementsResult) => void; // NEW: Callback for UI updates
     private lastIdleSummary: string = ''; // Store summary for TTS when user returns
+    private abortController: AbortController | null = null; // Controller to abort pending idle work
 
     constructor(
         storage: IStorageService, 
@@ -43,12 +44,31 @@ export class IdleService implements IIdleService {
     }
 
     public async initialize(): Promise<void> {
-        console.log('[IdleService] Initializing...');
+        console.log('[IdleService] Initializing idle detection...');
+        console.log('[IdleService] Workflow status:', {
+            hasOrchestrator: !!this.orchestrator,
+            hasAutonomousAgent: !!this.autonomousAgent,
+            hasCallback: !!this.onIdleCallback
+        });
         
         this.detector.on('idle', () => this.handleIdle());
         this.detector.on('active', () => this.handleActive());
         
+        vscode.commands.registerCommand('contextkeeper.checkIdleStatus', () => {
+            const state = this.detector.getState();
+            const msg = `Idle Detector Status:\n` +
+                `• Running: ${state.isMonitoring}\n` +
+                `• Current State: ${state.isIdle ? 'IDLE' : 'ACTIVE'}\n` +
+                `• Threshold: ${state.thresholdMs}ms (${state.thresholdMs / 1000}s)\n` +
+                `• Timer Active: ${state.hasTimer}\n` +
+                `• Currently Processing: ${this.isHandlingIdle}\n` +
+                `• Orchestrator: ${this.orchestrator ? '✅' : '❌'}\n` +
+                `• AutonomousAgent: ${this.autonomousAgent ? '✅' : '❌'}`;
+            vscode.window.showInformationMessage(msg);
+        });
+        
         this.detector.start();
+        console.log('[IdleService] ✅ Idle detection started');
     }
 
     public dispose(): void {
@@ -79,6 +99,10 @@ export class IdleService implements IIdleService {
     setWorkflowServices(orchestrator: Orchestrator, autonomousAgent: AutonomousAgent): void {
         this.orchestrator = orchestrator;
         this.autonomousAgent = autonomousAgent;
+        console.log('[IdleService] ✅ Workflow services configured:', {
+            hasOrchestrator: !!this.orchestrator,
+            hasAutonomousAgent: !!this.autonomousAgent
+        });
     }
 
     /**
@@ -92,43 +116,51 @@ export class IdleService implements IIdleService {
     }
 
     private async handleIdle(): Promise<void> {
-        if (!this.isEnabled) { return; }
-        
-        // Check if already handling idle to prevent duplicates
-        if (this.isHandlingIdle) {
-            console.log('[IdleService] Already handling idle, ignoring duplicate event');
-            return;
+        if (!this.isEnabled || this.isHandlingIdle) { 
+            console.log(`[IdleService] Skipping idle - enabled: ${this.isEnabled}, already handling: ${this.isHandlingIdle}`);
+            return; 
         }
 
-        console.log('[IdleService] User went idle! Starting ONE-TIME idle improvements workflow...');
-        
-        // Pause the detector - we'll resume when user comes back
-        this.detector.stop();
-        
-        // Reset work tracker
+        console.log('[IdleService] 🌙 User went IDLE - starting workflow...');
+        this.isHandlingIdle = true;
         this.workDoneWhileIdle = [];
+        
+        // Create abort controller for this idle session
+        this.abortController = new AbortController();
 
         try {
-            // Silent operation - no blocking notifications
-            
-            // If orchestrator and autonomous agent are set, use new workflow
             if (this.orchestrator && this.autonomousAgent) {
+                console.log('[IdleService] ✅ Orchestrator and AutonomousAgent available - starting workflow');
                 await this.handleIdleImprovements(this.orchestrator, this.autonomousAgent);
             } else {
-                // Fallback to legacy callback if provided
-            if (this.onIdleCallback) {
-                try {
-                    await this.onIdleCallback();
-                } catch (error) {
-                        console.error('[IdleService] Legacy callback failed:', error);
+                console.warn('[IdleService] ⚠️  Cannot start idle workflow:', {
+                    hasOrchestrator: !!this.orchestrator,
+                    hasAutonomousAgent: !!this.autonomousAgent,
+                    hasCallback: !!this.onIdleCallback
+                });
+                
+                if (this.onIdleCallback) {
+                    console.log('[IdleService] Falling back to onIdleCallback');
+                    try {
+                        await this.onIdleCallback();
+                    } catch (error) {
+                        console.error('[IdleService] Callback failed:', error);
                     }
+                } else {
+                    console.error('[IdleService] ❌ No workflow configured - idle detection is running but has no action to perform!');
                 }
             }
-
         } catch (error) {
-            console.error('[IdleService] Error handling idle state:', error);
-                }
+            // Check if error is due to abort
+            if (error instanceof Error && error.name === 'AbortError') {
+                console.log('[IdleService] Idle workflow aborted by user activity');
+            } else {
+                console.error('[IdleService] Idle workflow error:', error);
             }
+        } finally {
+            this.abortController = null;
+        }
+    }
 
     /**
      * Main entry point for idle improvements workflow.
@@ -138,23 +170,28 @@ export class IdleService implements IIdleService {
         orchestrator: Orchestrator, // Orchestrator instance
         autonomousAgent: AutonomousAgent // AutonomousAgent instance
     ): Promise<IdleImprovementsResult | null> {
-        if (this.isHandlingIdle) {
-            console.log('[IdleService] Already handling idle improvements');
-            return null;
-            }
-
-        this.isHandlingIdle = true;
+        // Note: isHandlingIdle is already set to true by handleIdle()
+        // No need to check again here
 
         try {
             console.log('[IdleService] Starting idle improvements workflow...');
+
+            // Check if aborted before starting
+            this.abortController?.signal.throwIfAborted();
 
             // Step 1: Create a SINGLE timestamped branch for this idle session
             await autonomousAgent.ensureIdleBranch();
             console.log('[IdleService] ✓ Branch created');
 
+            // Check if aborted after branch creation
+            this.abortController?.signal.throwIfAborted();
+
             // Step 2: Request Orchestrator to collect and analyze context
             const result = await orchestrator.analyzeForIdleImprovements();
             console.log('[IdleService] ✓ Context analyzed');
+
+            // Check if aborted after analysis
+            this.abortController?.signal.throwIfAborted();
 
             // Step 3: Request Autonomous to store session/test artifacts in LanceDB and track AI edits
             // This also EXECUTES the generated tests
@@ -162,6 +199,9 @@ export class IdleService implements IIdleService {
                 await autonomousAgent.storeIdleResults(result, this.storage, orchestrator);
                 console.log('[IdleService] ✓ Tests generated and executed');
             }
+
+            // Check if aborted after test generation
+            this.abortController?.signal.throwIfAborted();
 
             // Step 4: Run linting on active file and create CodeAction fix suggestions
             const activeEditor = vscode.window.activeTextEditor;
@@ -172,6 +212,9 @@ export class IdleService implements IIdleService {
                     const diagnostics = vscode.languages.getDiagnostics(activeEditor.document.uri);
                     if (diagnostics.length > 0) {
                         console.log(`[IdleService] Found ${diagnostics.length} lint issues`);
+                        
+                        // Check if aborted before lint fixes
+                        this.abortController?.signal.throwIfAborted();
                         
                         // Request autonomous agent to create lint fix suggestions
                         // This will use the CodeActionProvider to show Keep/Undo UI
@@ -202,6 +245,11 @@ export class IdleService implements IIdleService {
             return result || null;
 
         } catch (error) {
+            // Re-throw abort errors so they can be caught in handleIdle
+            if (error instanceof Error && error.name === 'AbortError') {
+                throw error;
+            }
+            
             console.error('[IdleService] Idle improvements workflow failed:', error);
             const errorMsg = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Idle improvements failed: ${errorMsg}`);
@@ -250,18 +298,18 @@ export class IdleService implements IIdleService {
     }
 
     private handleActive(): void {
-        console.log('[IdleService] User is BACK! Restarting idle detection.');
         this.lastSessionTime = Date.now();
         
-        // Restart the detector for the next idle period
-        if (this.isEnabled) {
-            this.detector.start();
+        // CRITICAL: Stop any pending work immediately by aborting
+        if (this.isHandlingIdle && this.abortController) {
+            console.log('[IdleService] User returned - aborting pending idle workflow');
+            this.abortController.abort();
+            this.isHandlingIdle = false;
         }
         
-        // Use TTS to speak the summary if available (for sponsor track demo)
+        // Speak the summary via TTS
         if (this.voiceService && this.lastIdleSummary) {
             try {
-                console.log('[IdleService] Speaking summary via ElevenLabs...');
                 this.voiceService.speak(
                     `Welcome back! While you were away: ${this.lastIdleSummary}`,
                     'casual'
@@ -271,7 +319,7 @@ export class IdleService implements IIdleService {
             }
         }
         
-        // Show summary of work done while idle
+        // Show work completed notification
         if (this.workDoneWhileIdle.length > 0) {
             const summary = [
                 '🎯 **Work Completed While You Were Away:**',
@@ -288,7 +336,6 @@ export class IdleService implements IIdleService {
                 }
             });
             
-            // Clear the tracker
             this.workDoneWhileIdle = [];
         }
     }

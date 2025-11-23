@@ -23,32 +23,58 @@ export class IdleDetector extends EventEmitter implements IIdleDetector {
 
   public setThreshold(ms: number): void {
     this.thresholdMs = ms;
-    if (this.isMonitoring && !this._isIdle) {
-      this.resetTimer();
-    }
+    // Don't auto-start timer when threshold changes
+    // Timer only starts on first user activity
   }
 
   public start(): void {
-    if (this.isMonitoring) { return; }
+    if (this.isMonitoring) { 
+      return; 
+    }
     
     this.isMonitoring = true;
-    this.resetTimer();
     
     try {
-      // Track ALL user activity that indicates they're present:
-      // - Keyboard: typing (onDidChangeTextDocument)
-      // - Mouse clicks/movements: selection changes (onDidChangeTextEditorSelection)
-      // - Mouse movements: active editor changes (onDidChangeActiveTextEditor) 
-      // - Window focus: window state changes (onDidChangeWindowState)
       this.disposables.push(
-        vscode.window.onDidChangeWindowState(() => this.handleActivity('windowFocus')),
-        vscode.window.onDidChangeTextEditorSelection(() => this.handleActivity('click/selection')),
-        vscode.workspace.onDidChangeTextDocument(() => this.handleActivity('typing')),
-        vscode.window.onDidChangeActiveTextEditor(() => this.handleActivity('mouseMovement/editorSwitch'))
+        vscode.workspace.onDidChangeTextDocument((e) => {
+          if (e.document.uri.scheme === 'file' || e.document.uri.scheme === 'untitled') {
+            this.handleActivity('typing');
+          }
+        }),
+        
+        vscode.window.onDidChangeTextEditorSelection((e) => {
+          this.handleActivity('selection');
+        }),
+        
+        vscode.window.onDidChangeTextEditorVisibleRanges((e) => {
+          this.handleActivity('scroll');
+        }),
+        
+        vscode.window.onDidChangeActiveTextEditor((e) => {
+          if (e) {
+            this.handleActivity('tabSwitch');
+          }
+        }),
+        
+        vscode.window.onDidChangeWindowState((e) => {
+          if (e.focused) {
+            this.handleActivity('windowFocus');
+          }
+        }),
+        
+        vscode.window.onDidChangeActiveTerminal(() => {
+          this.handleActivity('terminal');
+        }),
+        
+        vscode.window.onDidChangeVisibleTextEditors(() => {
+          this.handleActivity('editorLayout');
+        })
       );
-      console.log('[IdleDetector] Monitoring typing, clicks, mouse movements, and window focus');
+      
+      // Start the idle timer now that listeners are registered
+      this.resetTimer();
+      console.log('[IdleDetector] ✅ Started monitoring with timer');
     } catch (error) {
-      console.error('[IdleDetector] Error starting monitoring:', error);
       this.stop();
     }
   }
@@ -62,11 +88,19 @@ export class IdleDetector extends EventEmitter implements IIdleDetector {
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
     this._isIdle = false;
-    console.log('[IdleDetector] Stopped monitoring');
   }
 
   public reset(): void {
     this.handleActivity('manualReset');
+  }
+
+  public getState(): { isIdle: boolean; isMonitoring: boolean; thresholdMs: number; hasTimer: boolean } {
+    return {
+      isIdle: this._isIdle,
+      isMonitoring: this.isMonitoring,
+      thresholdMs: this.thresholdMs,
+      hasTimer: this.timer !== null
+    };
   }
 
   public dispose(): void {
@@ -75,29 +109,33 @@ export class IdleDetector extends EventEmitter implements IIdleDetector {
   }
 
   private handleActivity(source: string): void {
-    console.log(`[IdleDetector] Activity detected: ${source}`);
+    if (!this.isMonitoring) {
+      return;
+    }
     this.resetTimer();
   }
 
   private resetTimer(): void {
-    if (!this.isMonitoring) { return; }
+    if (!this.isMonitoring) { 
+      return; 
+    }
 
     if (this.timer) {
       clearTimeout(this.timer);
+      this.timer = null;
     }
     
     if (this._isIdle) {
       this._isIdle = false;
-      console.log('[IdleDetector] ✅ State transition: IDLE → ACTIVE (user returned)');
+      console.log('[IdleDetector] 🟢 User became ACTIVE');
       this.emit('active');
     }
 
     this.timer = setTimeout(() => {
-      if (!this._isIdle && this.isMonitoring) {
+      if (this.isMonitoring && !this._isIdle) {
         this._isIdle = true;
-        console.log(`[IdleDetector] ⏸️  State transition: ACTIVE → IDLE (threshold: ${this.thresholdMs}ms reached)`);
+        console.log('[IdleDetector] 🌙 User became IDLE - emitting idle event');
         this.emit('idle');
-        // Don't set another timer - wait for user activity to resume
       }
     }, this.thresholdMs);
   }

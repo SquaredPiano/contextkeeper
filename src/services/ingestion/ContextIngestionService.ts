@@ -244,62 +244,146 @@ export class ContextIngestionService {
 
       const affectedFunctionsList = Array.from(affectedFunctions);
 
-      // Calculate a rough "diff" or summary of changes with actual code context
-      const changeSummary = changes.map(c => {
+      // Get document symbols once for all changes
+      let documentSymbols: vscode.DocumentSymbol[] = [];
+      try {
+        documentSymbols = await getDocumentSymbols(document.uri);
+      } catch (error) {
+        console.warn('[ContextIngestion] Failed to get document symbols:', error);
+      }
+
+      // CRITICAL: Capture FULL CODE CONTEXT, not just metadata
+      const changeDetails = await Promise.all(changes.map(async (c) => {
         const startLine = c.range.start.line;
         const endLine = c.range.end.line;
-        const textPreview = c.text.substring(0, 200).replace(/\n/g, '\\n');
+        const lineCount = document.lineCount;
         
-        // Get surrounding context (3 lines before and after)
+        // Get the FULL text that was added
+        const addedText = c.text;
+        
+        // Get the FULL text that was removed (if we had access to before state)
+        const removedText = c.rangeLength > 0 ? document.getText(c.range) : '';
+        
+        // Get 10 lines of context BEFORE (not 3)
         let contextBefore = '';
-        let contextAfter = '';
         try {
-          const lineCount = document.lineCount;
           if (startLine > 0) {
-            const beforeStart = Math.max(0, startLine - 3);
+            const beforeStart = Math.max(0, startLine - 10);
             contextBefore = document.getText(new vscode.Range(beforeStart, 0, startLine, 0));
           }
+        } catch (error) {
+          console.warn('[ContextIngestion] Failed to get context before:', error);
+        }
+        
+        // Get 10 lines of context AFTER
+        let contextAfter = '';
+        try {
           if (endLine < lineCount - 1) {
-            const afterEnd = Math.min(lineCount - 1, endLine + 3);
+            const afterEnd = Math.min(lineCount - 1, endLine + 10);
             contextAfter = document.getText(new vscode.Range(endLine + 1, 0, afterEnd + 1, 0));
           }
-        } catch {
-          // Ignore context extraction errors
+        } catch (error) {
+          console.warn('[ContextIngestion] Failed to get context after:', error);
+        }
+
+        // Get the FULL FUNCTION body if this edit is inside a function
+        let affectedFunctionData: { name: string; fullBody: string; startLine: number; endLine: number } | undefined;
+        try {
+          const position = new vscode.Position(startLine, c.range.start.character);
+          const functionName = findFunctionAtPosition(documentSymbols, position);
+          
+          if (functionName) {
+            // Find the actual symbol to get its range
+            const findSymbolByName = (symbols: vscode.DocumentSymbol[], name: string): vscode.DocumentSymbol | undefined => {
+              for (const sym of symbols) {
+                if (sym.name === name && sym.range.contains(position)) {
+                  return sym;
+                }
+                if (sym.children) {
+                  const found = findSymbolByName(sym.children, name);
+                  if (found) {return found;}
+                }
+              }
+              return undefined;
+            };
+            
+            const functionSymbol = findSymbolByName(documentSymbols, functionName);
+            if (functionSymbol) {
+              affectedFunctionData = {
+                name: functionName,
+                fullBody: document.getText(functionSymbol.range),
+                startLine: functionSymbol.range.start.line,
+                endLine: functionSymbol.range.end.line
+              };
+            }
+          }
+        } catch (error) {
+          console.warn('[ContextIngestion] Failed to get function context:', error);
         }
 
         return {
           range: { 
-            start: { line: startLine + 1, char: c.range.start.character + 1 },  // Convert to 1-based
-            end: { line: endLine + 1, char: c.range.end.character + 1 }          // Convert to 1-based
+            start: { line: startLine + 1, char: c.range.start.character + 1 },
+            end: { line: endLine + 1, char: c.range.end.character + 1 }
           },
-          textLength: c.text.length,
-          textPreview,
-          contextBefore: contextBefore.substring(0, 200),
-          contextAfter: contextAfter.substring(0, 200),
-          rangeText: c.rangeLength > 0 ? document.getText(c.range).substring(0, 100) : ''
+          addedText,
+          removedText,
+          contextBefore,
+          contextAfter,
+          affectedFunction: affectedFunctionData
         };
-      });
+      }));
 
-      // 1. Log raw event for history
+      // Get full file content for small files (<10KB)
+      const fileSize = Buffer.byteLength(document.getText(), 'utf8');
+      const fullFileContent = fileSize < 10240 ? document.getText() : undefined;
+
+      // Build rich metadata with ACTUAL CODE
+      const richMetadata: import('../storage/schema').FileEditMetadata = {
+        languageId: document.languageId,
+        changes: changeDetails,
+        fullFileContent,
+        fileSize
+      };
+
+      // 1. Log raw event with RICH CONTEXT
       this.queue.enqueue({
         type: 'event',
         data: {
           timestamp: Date.now(),
           event_type: 'file_edit',
           file_path: relativePath,
-          metadata: JSON.stringify({
-            languageId: document.languageId,
-            changeCount: changes.length,
-            changes: changeSummary,
-            affectedFunctions: affectedFunctionsList
-          })
+          metadata: JSON.stringify(richMetadata)
         }
       });
 
-      console.log(`[ContextIngestion] Stored event with ${changeSummary.length} changes at line ${changeSummary[0]?.range.start.line} (1-based)`);
+      console.log(`[ContextIngestion] Stored event with FULL CODE CONTEXT: ${changeDetails.length} changes, ` +
+        `${changeDetails.filter(c => c.affectedFunction).length} functions affected, ` +
+        `file size: ${(fileSize/1024).toFixed(1)}KB`);
 
-      // 2. Log Action for Vector Search (Searchable Context)
-      // Create a rich natural language description of what happened
+      // 2. Build RICH CodeContext for Action (for semantic search with actual code)
+      const codeContext: import('../storage/schema').CodeContext = {
+        changes: changeDetails.map((c) => ({
+          file: relativePath,
+          language: document.languageId,
+          beforeCode: c.removedText || c.contextBefore,
+          afterCode: c.addedText || c.contextAfter,
+          function: c.affectedFunction?.name,
+          fullFunctionBefore: c.affectedFunction?.fullBody,
+          fullFunctionAfter: c.affectedFunction?.fullBody // TODO: Track before/after state
+        })),
+        relatedFunctions: changeDetails
+          .filter(c => c.affectedFunction)
+          .map(c => ({
+            name: c.affectedFunction!.name,
+            file: relativePath,
+            body: c.affectedFunction!.fullBody
+          })),
+        imports: [], // TODO: Extract imports from file
+        relatedFiles: [] // TODO: Find related files
+      };
+
+      // Create a rich natural language description for vector search
       let description = `User edited ${relativePath}`;
       
       if (affectedFunctionsList.length > 0) {
@@ -326,18 +410,19 @@ export class ContextIngestionService {
           }
       }
 
+      // Queue action with RICH code context
       this.queue.enqueue({
         type: 'action',
         data: {
           session_id: this.sessionManager.getSessionId(),
           timestamp: Date.now(),
           description: description,
-          diff: JSON.stringify(changeSummary),
+          code_context: JSON.stringify(codeContext),
           files: JSON.stringify([relativePath])
         }
       });
 
-      console.log(`[ContextIngestion] Queued action for embedding: "${description.substring(0, 100)}..."`);
+      console.log(`[ContextIngestion] Queued action with RICH CODE CONTEXT for embedding: "${description.substring(0, 100)}..."`);
 
       this.logToOutput(`[FILE_EDIT] ${relativePath} (${changes.length} changes)${affectedFunctionsList.length > 0 ? ` in ${affectedFunctionsList.join(', ')}` : ''}`);
       console.log(`[ContextIngestionService] File edited: ${relativePath} (${changes.length} changes)${affectedFunctionsList.length > 0 ? ` in ${affectedFunctionsList.join(', ')}` : ''}`);
@@ -372,7 +457,12 @@ export class ContextIngestionService {
           session_id: this.sessionManager.getSessionId(),
           timestamp: Date.now(),
           description: `User committed changes: ${commit.message}`,
-          diff: '', // We could fetch diff if needed, but message is usually enough for high-level context
+          code_context: JSON.stringify({ 
+            changes: [], 
+            relatedFunctions: [], 
+            imports: [], 
+            relatedFiles: [] 
+          }), // Minimal context for commits - could be enhanced to fetch actual diff
           files: JSON.stringify(commit.files)
         }
       });

@@ -160,6 +160,7 @@ export class LanceDBStorage implements IStorageService {
       id: uuidv4(),
       ...action,
       embedding,
+      code_context: typeof action.code_context === 'string' ? action.code_context : JSON.stringify(action.code_context || '{}'),
       files: typeof action.files === 'string' ? action.files : JSON.stringify(action.files || [])
     };
 

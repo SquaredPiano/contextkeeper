@@ -149,9 +149,7 @@ export class CommandManager {
             channel.appendLine(`    Session: ${action.session_id}`);
             channel.appendLine(`    Files: ${action.files}`);
             channel.appendLine(`    Has Embedding: ${action.embedding ? 'YES (' + (Array.isArray(action.embedding) ? action.embedding.length : 'object') + ')' : 'NO'}`);
-            if (action.diff && action.diff.length < 500) {
-              channel.appendLine(`    Diff: ${action.diff}`);
-            }
+            // Code context is stored in code_context property as JSON string
           });
 
           channel.show();

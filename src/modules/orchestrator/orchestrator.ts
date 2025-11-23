@@ -794,7 +794,10 @@ export class Orchestrator extends EventEmitter {
       // Step 2: Query LanceDB for RELEVANT historical context using AST-PARSED symbols
       // NOT generic queries - use actual function/class names from DocumentSymbol API
       let historicalSessions: Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }> = [];
-      let historicalActions: Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }> = [];
+      let historicalActions: Array<{ actionId: string; description: string; timestamp: string; code_context?: string; metadata?: unknown }> = [];
+      
+      // CRITICAL: Fetch RECENT EVENTS with RICH CODE CONTEXT
+      let recentCodeContext: Array<{ file: string; function?: string; code: string; timestamp: number }> = [];
 
       if (currentContext.files.activeFile && currentContext.files.activeFileContent) {
         try {
@@ -838,61 +841,113 @@ export class Orchestrator extends EventEmitter {
             }
           }
           
+          // CRITICAL: Fetch recent events from database with RICH metadata
+          try {
+            const events = await (this.storage as unknown as { getRecentEvents: (limit: number) => Promise<Array<{ event_type: string; file_path: string; timestamp: number; metadata: string }>> }).getRecentEvents(20);
+            
+            console.log(`[Orchestrator] 📊 Fetched ${events.length} recent events from database`);
+            
+            // Parse rich metadata from events and extract code context
+            for (const event of events) {
+              if (event.event_type === 'file_edit' && event.metadata) {
+                try {
+                  const metadata = JSON.parse(event.metadata) as import('../../services/storage/schema').FileEditMetadata;
+                  
+                  // Extract code from each change
+                  for (const change of metadata.changes || []) {
+                    if (change.affectedFunction) {
+                      recentCodeContext.push({
+                        file: event.file_path,
+                        function: change.affectedFunction.name,
+                        code: change.affectedFunction.fullBody,
+                        timestamp: event.timestamp
+                      });
+                    } else if (change.addedText) {
+                      // Include the added text with surrounding context
+                      const codeSnippet = [
+                        change.contextBefore ? `// Context before:\n${change.contextBefore.substring(0, 200)}` : '',
+                        change.addedText,
+                        change.contextAfter ? `// Context after:\n${change.contextAfter.substring(0, 200)}` : ''
+                      ].filter(Boolean).join('\n');
+                      
+                      recentCodeContext.push({
+                        file: event.file_path,
+                        code: codeSnippet,
+                        timestamp: event.timestamp
+                      });
+                    }
+                  }
+                  
+                  // Include full file content if available
+                  if (metadata.fullFileContent && event.file_path === currentContext.files.activeFile) {
+                    console.log(`[Orchestrator] 📄 Found full file content for ${event.file_path}`);
+                  }
+                } catch (parseError) {
+                  console.warn(`[Orchestrator] Failed to parse event metadata:`, parseError);
+                }
+              }
+            }
+            
+            console.log(`[Orchestrator] 🔍 Extracted ${recentCodeContext.length} code snippets from recent events`);
+          } catch (error) {
+            console.warn('[Orchestrator] Failed to fetch recent events:', error);
+          }
+          
           // Fallback: if no symbols found, skip historical search (better than generic queries)
           if (identifiers.length === 0) {
             console.log('[Orchestrator] No AST symbols found - skipping historical search to avoid irrelevant results');
-            return null;
-          }
-          
-          // Build SPECIFIC query from AST-parsed identifiers
-          const specificQuery = `${fileName} ${identifiers.join(' ')}`;
-          
-          console.log(`[Orchestrator] 🔍 Vector search query: "${specificQuery}"`);
-
-          // Query with the SPECIFIC context
-          historicalSessions = await (this.storage as unknown as { getSimilarSessions: (query: string, limit: number) => Promise<Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }>> }).getSimilarSessions(specificQuery, 3);
-          historicalActions = await (this.storage as unknown as { getSimilarActions: (query: string, limit: number) => Promise<Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }>> }).getSimilarActions(specificQuery, 3);
-
-          console.log(`[Orchestrator] 📊 Vector search results: ${historicalSessions.length} sessions, ${historicalActions.length} actions (before filtering)`);
-
-          // Filter results by semantic similarity threshold (0.7+) and time window (1 hour)
-          const ONE_HOUR_MS = 60 * 60 * 1000;
-          const now = Date.now();
-          
-          historicalSessions = historicalSessions.filter((s) => {
-            const timestamp = typeof s.timestamp === 'string' ? Date.parse(s.timestamp) : s.timestamp;
-            const isRecent = timestamp && (now - timestamp) < ONE_HOUR_MS;
-            const hasScore = (s as { _distance?: number })._distance !== undefined;
-            const isRelevant = !hasScore || ((s as unknown as { _distance: number })._distance >= 0.7); // Higher score = more similar
+            // Don't return null - continue with code context from recent events
+          } else {
+            // Build SPECIFIC query from AST-parsed identifiers
+            const specificQuery = `${fileName} ${identifiers.join(' ')}`;
             
-            if (!isRecent) {
-              console.log(`[Orchestrator] ❌ Filtered out old session (timestamp: ${s.timestamp})`);
-            } else if (hasScore && !isRelevant) {
-              console.log(`[Orchestrator] ❌ Filtered out low-relevance session (score: ${(s as { _distance?: number })._distance})`);
+            console.log(`[Orchestrator] 🔍 Vector search query: "${specificQuery}"`);
+
+            // Query with the SPECIFIC context
+            historicalSessions = await (this.storage as unknown as { getSimilarSessions: (query: string, limit: number) => Promise<Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }>> }).getSimilarSessions(specificQuery, 3);
+            historicalActions = await (this.storage as unknown as { getSimilarActions: (query: string, limit: number) => Promise<Array<{ actionId: string; description: string; timestamp: string; code_context?: string; metadata?: unknown }>> }).getSimilarActions(specificQuery, 3);
+
+            console.log(`[Orchestrator] 📊 Vector search results: ${historicalSessions.length} sessions, ${historicalActions.length} actions (before filtering)`);
+
+            // Filter results by semantic similarity threshold (0.7+) and time window (1 hour)
+            const ONE_HOUR_MS = 60 * 60 * 1000;
+            const now = Date.now();
+            
+            historicalSessions = historicalSessions.filter((s) => {
+              const timestamp = typeof s.timestamp === 'string' ? Date.parse(s.timestamp) : s.timestamp;
+              const isRecent = timestamp && (now - timestamp) < ONE_HOUR_MS;
+              const hasScore = (s as { _distance?: number })._distance !== undefined;
+              const isRelevant = !hasScore || ((s as unknown as { _distance: number })._distance >= 0.7); // Higher score = more similar
+              
+              if (!isRecent) {
+                console.log(`[Orchestrator] ❌ Filtered out old session (timestamp: ${s.timestamp})`);
+              } else if (hasScore && !isRelevant) {
+                console.log(`[Orchestrator] ❌ Filtered out low-relevance session (score: ${(s as { _distance?: number })._distance})`);
+              }
+              
+              return isRecent && isRelevant;
+            });
+            
+            historicalActions = historicalActions.filter((a) => {
+              const timestamp = typeof a.timestamp === 'string' ? Date.parse(a.timestamp) : a.timestamp;
+              const isRecent = timestamp && (now - timestamp) < ONE_HOUR_MS;
+              const hasScore = (a as { _distance?: number })._distance !== undefined;
+              const isRelevant = !hasScore || ((a as unknown as { _distance: number })._distance >= 0.7);
+              
+              if (!isRecent) {
+                console.log(`[Orchestrator] ❌ Filtered out old action (timestamp: ${a.timestamp})`);
+              } else if (hasScore && !isRelevant) {
+                console.log(`[Orchestrator] ❌ Filtered out low-relevance action (score: ${(a as { _distance?: number })._distance})`);
+              }
+              
+              return isRecent && isRelevant;
+            });
+
+            console.log(`[Orchestrator] ✅ After filtering: ${historicalSessions.length} relevant sessions, ${historicalActions.length} relevant actions`);
+            
+            if (historicalSessions.length === 0 && historicalActions.length === 0) {
+              console.log(`[Orchestrator] ⚠️  No relevant historical context found - proceeding with current context only`);
             }
-            
-            return isRecent && isRelevant;
-          });
-          
-          historicalActions = historicalActions.filter((a) => {
-            const timestamp = typeof a.timestamp === 'string' ? Date.parse(a.timestamp) : a.timestamp;
-            const isRecent = timestamp && (now - timestamp) < ONE_HOUR_MS;
-            const hasScore = (a as { _distance?: number })._distance !== undefined;
-            const isRelevant = !hasScore || ((a as unknown as { _distance: number })._distance >= 0.7);
-            
-            if (!isRecent) {
-              console.log(`[Orchestrator] ❌ Filtered out old action (timestamp: ${a.timestamp})`);
-            } else if (hasScore && !isRelevant) {
-              console.log(`[Orchestrator] ❌ Filtered out low-relevance action (score: ${(a as { _distance?: number })._distance})`);
-            }
-            
-            return isRecent && isRelevant;
-          });
-
-          console.log(`[Orchestrator] ✅ After filtering: ${historicalSessions.length} relevant sessions, ${historicalActions.length} relevant actions`);
-          
-          if (historicalSessions.length === 0 && historicalActions.length === 0) {
-            console.log(`[Orchestrator] ⚠️  No relevant historical context found - proceeding with current context only`);
           }
         } catch (error) {
           console.warn("[Orchestrator] Failed to query historical context:", error);
@@ -902,8 +957,7 @@ export class Orchestrator extends EventEmitter {
         console.log('[Orchestrator] No active file - skipping historical context search');
       }
 
-      // Step 3: Merge contexts - build unified context for Gemini
-      // Historical context now includes ONLY relevant past work on same files/functions
+      // Step 3: Merge contexts with RICH CODE CONTEXT from recent events
       const unifiedContext = await this.buildUnifiedIdleContext(currentContext, historicalSessions, historicalActions);
 
       // Step 4: Send to Gemini with idle-specific prompt (tests + summary + recommendations only, NO patches)
