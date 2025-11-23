@@ -21,7 +21,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { GitService } from './modules/gitlogs/GitService';
 import { Orchestrator, OrchestratorConfig, PipelineResult, FileAnalysisResult } from './modules/orchestrator/orchestrator';
-import { readAllFilesHandler } from './modules/gitlogs/fileReader';
 
 // Load environment variables
 const envPath = path.resolve(__dirname, '../.env');
@@ -150,10 +149,14 @@ async function demoFullIngestion() {
           const relativePath = path.relative(baseDir, fullPath);
 
           if (entry.isDirectory()) {
-            if (!shouldIncludeFile(relativePath)) continue;
+            if (!shouldIncludeFile(relativePath)) {
+              continue;
+            }
             readFilesRecursive(fullPath, baseDir);
           } else if (entry.isFile()) {
-            if (!shouldIncludeFile(relativePath)) continue;
+            if (!shouldIncludeFile(relativePath)) {
+              continue;
+            }
             
             try {
               const stats = fs.statSync(fullPath);
@@ -172,7 +175,7 @@ async function demoFullIngestion() {
             }
           }
         }
-      } catch (err) {
+      } catch {
         // Ignore permission errors
       }
     }
@@ -215,7 +218,6 @@ async function demoFullIngestion() {
   // Find a sample file to analyze
   let sampleFile: { filePath: string; content: string } | null = null;
   try {
-    const allFiles: Array<{ filePath: string; content: string }> = [];
     const includePattern = /\.(ts|js|tsx|jsx)$/;
     const excludeDirs = ['node_modules', '.git', 'dist', 'out', 'build', 'coverage'];
 

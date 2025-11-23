@@ -1,0 +1,179 @@
+[dotenv@17.2.3] injecting env (7) from .env.local -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+🚀 REAL-WORLD CONTEXTKEEPER SIMULATION
+════════════════════════════════════════════════════════════════════════════════[0m
+Testing complete pipeline with actual codebase data
+
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+PHASE 1: Initialize Services
+════════════════════════════════════════════════════════════════════════════════[0m
+[GeminiService] Initializing with model: gemini-2.0-flash
+[GeminiService] Initialized successfully with model: gemini-2.0-flash
+[32m✓[0m Gemini Service ready
+Connecting to LanceDB Cloud: db://default-ilkz38
+Connected to LanceDB Cloud successfully
+[32m✓[0m LanceDB connected
+[SessionManager] Initialized session: 40bda1e7-d9e6-407c-a7fe-2bd1538a216f
+[32m✓[0m Session started: 40bda1e7-d9e6-407c-a7fe-2bd1538a216f
+[32m✓[0m Context Service ready
+[32m✓[0m Git Service ready (branch: dev1)
+[ContextIngestionService] Initializing Context Ingestion Service...
+[ContextKeeper Ingestion] [ContextIngestionService] Initializing...
+[ContextKeeper Ingestion] [12:42:14 AM] Ingestion queue started
+[ContextIngestionService] Ingestion queue started
+Failed to start GitWatcher: TypeError: Cannot read properties of undefined (reading 'getExtension')
+    at GitWatcher.start (/Users/vishnu/Documents/contextkeeper/src/services/ingestion/GitWatcher.ts:64:48)
+    at ContextIngestionService.initialize (/Users/vishnu/Documents/contextkeeper/src/services/ingestion/ContextIngestionService.ts:51:31)
+    at simulateRealSession (/Users/vishnu/Documents/contextkeeper/test-real-world-simulation.ts:311:26)
+[ContextKeeper Ingestion] [12:42:14 AM] Git watcher started for workspace: /Users/vishnu/Documents/contextkeeper
+[ContextIngestionService] Git watcher started for workspace: /Users/vishnu/Documents/contextkeeper
+[ContextIngestionService] Failed to setup listeners: vscode.window.onDidChangeActiveTextEditor is not a function TypeError: vscode.window.onDidChangeActiveTextEditor is not a function
+    at ContextIngestionService.setupListeners (/Users/vishnu/Documents/contextkeeper/src/services/ingestion/ContextIngestionService.ts:106:21)
+    at ContextIngestionService.initialize (/Users/vishnu/Documents/contextkeeper/src/services/ingestion/ContextIngestionService.ts:67:12)
+    at async simulateRealSession (/Users/vishnu/Documents/contextkeeper/test-real-world-simulation.ts:311:3)
+[ContextKeeper Ingestion] [12:42:14 AM] ❌ Failed to setup listeners: vscode.window.onDidChangeActiveTextEditor is not a function
+[ContextIngestionService] Storage connected for ingestion.
+[ContextKeeper Ingestion] [12:42:14 AM] Storage connected for ingestion
+[ContextKeeper Ingestion] [12:42:14 AM] ✅ Context Ingestion Service initialized
+[ContextIngestionService] ✅ Context Ingestion Service initialized
+[32m✓[0m Ingestion Service ready
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+PHASE 2: Simulate Developer Activity
+════════════════════════════════════════════════════════════════════════════════[0m
+[36mℹ[0m Found 15 real file edits from git history
+
+📝 Simulating file edits:
+  • src/extension.ts (50 lines, 3 functions)
+  • src/modules/elevenlabs/elevenlabs.ts (20 lines, 3 functions)
+  • src/ui/SidebarWebviewProvider.ts (41 lines, 3 functions)
+  • src/extension.ts (27 lines, 3 functions)
+  • src/managers/CommandManager.ts (26 lines, 3 functions)
+[32m✓[0m Ingested 5 file edits with embeddings
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+PHASE 3: Test RAG Context Retrieval
+════════════════════════════════════════════════════════════════════════════════[0m
+[32m✓[0m RAG retrieved 5 similar actions
+
+🔍 Top relevant past work:
+  1. Modified src/extension.ts: connect correct ui to main...
+  2. Modified src/extension.ts: connect correct ui to main...
+  3. Modified src/extension.ts: connect correct ui to main...
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+PHASE 4: Simulate Idle Detection (15 seconds passed)
+════════════════════════════════════════════════════════════════════════════════[0m
+[GeminiClient] Initializing with model: gemini-2.0-flash
+[GeminiClient] Creating model instance with name: gemini-2.0-flash
+[GeminiClient] Model initialized successfully
+Connecting to LanceDB Cloud: db://default-ilkz38
+Connected to LanceDB Cloud successfully
+[32m✓[0m Orchestrator initialized
+[CloudflareService] Using worker URL: https://contextkeeper-lint-worker.vishnu.workers.dev
+[TaskRegistry] Registered task: auto-lint
+[TaskRegistry] Registered task: auto-fix
+[TaskRegistry] Registered task: generate-tests
+[32m✓[0m Autonomous Agent ready
+[32m✓[0m Idle Service ready
+[36mℹ[0m ⏰ Running idle improvements analysis (this may take 20-40 seconds)...
+   Analyzing real codebase files with Gemini AI...
+
+[Orchestrator] Loaded 10 git commits
+[Orchestrator] Current branch: dev1
+[Orchestrator] Found 12 uncommitted changes
+[File Reader] [2025-11-23T05:42:18.710Z] Starting file scan...
+[FileReader] Starting file scan in workspace: /Users/vishnu/Documents/contextkeeper
+[File Reader] Found 18 files matching pattern.
+[FileReader] Found 18 files matching pattern
+[File Reader] Successfully read 18 files. Skipped 0.
+[FileReader] Successfully read 18 files. Skipped 0
+[File Reader] Sample files:
+[File Reader] - src/ui/StatusBarManager.ts (5624 chars)
+[File Reader] - src/ui/IssuesTreeProvider.ts (4822 chars)
+[File Reader] - src/managers/CommandManager.ts (11445 chars)
+[File Reader] - src/extension.ts (22945 chars)
+[File Reader] - src/managers/SessionManager.ts (1265 chars)
+[Orchestrator] Loaded 18 files from workspace
+[Orchestrator] Context collection completed successfully
+[Orchestrator] Collected current context for idle improvements
+[Orchestrator] Retrieved 5 similar sessions and 5 similar actions from LanceDB
+[32m✓[0m Analysis complete!
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+PHASE 5: Store & Retrieve Results
+════════════════════════════════════════════════════════════════════════════════[0m
+[AutonomousAgent] Storing idle improvements results in LanceDB...
+[AutonomousAgent] Successfully stored idle improvements results
+[32m✓[0m Results stored to LanceDB
+[32m✓[0m 📱 UI callback received!
+[32m✓[0m Session retrieved: "Reviewed 0 files including none...."
+[32m✓[0m Retrieved 5 recent actions from LanceDB
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+PHASE 6: Simulated UI Display - "While You Were Away"
+════════════════════════════════════════════════════════════════════════════════[0m
+
+────────────────────────────────────────────────────────────────────────────────
+🎯 [1mWhile you were away, ContextKeeper analyzed your work:[0m
+
+📋 [1mSummary:[0m
+   Hey! It looks like you've been focusing on integrating Gemini-generated code into the canvas page of your dashboard. You've also been connecting the UI elements to the main application and fixing some initial bugs. Given the recent work, it's a good time to solidify the Gemini integration with thorough testing and ensure the UI connections are rock solid. Prioritize error handling and edge case management, especially in the canvas page.
+
+✅ [1mTests Generated:[0m [32m1[0m
+
+   Test 1:
+   // canvas.test.tsx
+import { render, screen, fireEvent } from '@testing-library/react';
+import CanvasPage from './page'; // Assuming './page' is the co...
+
+💡 [1mRecommendations:[0m
+   1. [31m[HIGH][0m Implement robust error handling within the canvas page, particularly when dealing with Gemini-generated code. Consider scenarios where the code is invalid, malformed, or causes runtime errors.
+   2. [31m[HIGH][0m Thoroughly test the integration between the canvas page and the main application UI. Ensure data is passed correctly and UI updates are reflected accurately.
+   3. [33m[MEDIUM][0m Add input validation to the Gemini code input field to prevent invalid code from being processed. Consider validating the syntax and structure of the code.
+   4. [33m[MEDIUM][0m Implement loading states and progress indicators to provide feedback to the user while Gemini-generated code is being processed.
+   5. [36m[LOW][0m Consider adding more detailed logging to track the flow of data and identify potential issues during the Gemini code integration process.
+
+────────────────────────────────────────────────────────────────────────────────
+
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+PHASE 7: Verify Data Persistence
+════════════════════════════════════════════════════════════════════════════════[0m
+[32m✓[0m ✓ 10 events persisted
+[32m✓[0m ✓ 10 actions with embeddings persisted
+[32m✓[0m ✓ 3 sessions with embeddings persisted
+[32m✓[0m ✓ Vector search working (3 results for: "Modified src/extension.ts: connect correct ui to m...")
+
+[1m[36m════════════════════════════════════════════════════════════════════════════════
+🎉 SIMULATION COMPLETE
+════════════════════════════════════════════════════════════════════════════════[0m
+
+📊 Session Summary:
+   Session ID               : [36m40bda1e7-d9e6-407c-a7fe-2bd1538a216f[0m
+   Git Branch               : [36mdev1[0m
+   Files Edited             : [36m5[0m
+   Events Stored            : [36m10[0m
+   Actions with Embeddings  : [36m10[0m
+   Tests Generated          : [36m1[0m
+   Recommendations          : [36m5[0m
+   RAG Queries              : [36m3[0m
+   UI Updates               : [36mReceived[0m
+   Data Persistence         : [36mVerified[0m
+
+✅ [32m[1mALL SYSTEMS OPERATIONAL[0m
+
+The complete pipeline works end-to-end:
+  1. ✓ Real git history ingestion
+  2. ✓ Event & action storage with embeddings
+  3. ✓ RAG retrieval of similar past work
+  4. ✓ Orchestrator analysis with real files
+  5. ✓ Gemini AI generating tests + recommendations
+  6. ✓ Autonomous agent storing results
+  7. ✓ UI callback system functional
+  8. ✓ LanceDB persistence verified
+
+🚀 [1mNext:[0m Press F5 in VS Code to test with live UI
+

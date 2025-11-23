@@ -56,7 +56,6 @@ export class ElevenLabsService implements IVoiceService {
                               'professional') as VoiceType;
 
     try {
-      const voice: VoiceType = voiceStyle || 'casual';
       await this.performSpeak(text, voice);
     } catch (error) {
       console.error(`Error speaking "${text}":`, error);
@@ -127,18 +126,13 @@ export class ElevenLabsService implements IVoiceService {
     exec(command, async (error) => {
       if (error) {
         console.error(`Failed to play audio: ${error.message}`);
-      } else {
-        // Clean up file after playing
-        try {
-          await fs.unlink(filePath);
-        } catch (err) {
-          console.error('Failed to delete temp audio file:', err);
-        }
       }
       // Clean up file after playing (regardless of success/failure)
-      fs.unlink(filePath).catch((err) => {
+      try {
+        await fs.unlink(filePath);
+      } catch (err) {
         console.error('Failed to delete temp audio file:', err);
-      });
+      }
     });
   }
 }

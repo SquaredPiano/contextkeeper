@@ -104,9 +104,9 @@ export class NotificationManager {
 	/**
 	 * Show progress with steps
 	 */
-	static async showProgressWithSteps<T>(
+	static async showProgressWithSteps(
 		title: string,
-		steps: Array<{ message: string; task: () => Promise<any> }>
+		steps: Array<{ message: string; task: () => Promise<unknown> }>
 	): Promise<void> {
 		await this.withProgress(title, async (progress) => {
 			const increment = 100 / steps.length;

@@ -56,7 +56,9 @@ export class StatusBarManager {
 	private refreshEditorState(): void {
 		// If context service is not providing cursor info, fallback to vscode API
 		const editor = vscode.window.activeTextEditor;
-		if (!editor) return;
+		if (!editor) {
+			return;
+		}
 		const pos = editor.selection.active;
 
 		if (!this.currentContext) {
@@ -80,7 +82,9 @@ export class StatusBarManager {
 	}
 
 	private formatCounts(): string {
-		if (!this.currentContext) return '';
+		if (!this.currentContext) {
+			return '';
+		}
 
 		const filesEdited = this.currentContext.files.recentlyEdited?.length ?? 0;
 		const uncommitted = this.currentContext.git.uncommittedChanges?.length ?? 0;
@@ -107,9 +111,15 @@ export class StatusBarManager {
 		// Compose the status bar line in the requested order
 		const pieces = [] as string[];
 		pieces.push(`$(file-text) ${activeFile}`);
-		if (lineText) pieces.push(lineText);
-		if (branchText) pieces.push(branchText);
-		if (counts) pieces.push(counts);
+		if (lineText) {
+			pieces.push(lineText);
+		}
+		if (branchText) {
+			pieces.push(branchText);
+		}
+		if (counts) {
+			pieces.push(counts);
+		}
 
 		// If the extension had a special state (analyzing/complete/error), show an icon at end
 		let stateSuffix = '';
@@ -144,10 +154,12 @@ export class StatusBarManager {
 		// Show filename with up to two parent folders for clarity
 		try {
 			const parts = p.split(/\\|\//).filter(Boolean);
-			if (parts.length <= 2) return parts.join('/');
+			if (parts.length <= 2) {
+				return parts.join('/');
+			}
 			const last = parts.slice(-2).join('/');
 			return `.../${last}`;
-		} catch (e) {
+		} catch {
 			return p;
 		}
 	}

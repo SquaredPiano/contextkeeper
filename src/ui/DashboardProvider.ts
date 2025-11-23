@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { IContextService, DeveloperContext } from '../services/interfaces';
+import { IContextService } from '../services/interfaces';
 
 export class DashboardProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'contextkeeper.dashboard';
@@ -12,7 +12,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
 
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
-        context: vscode.WebviewViewResolveContext,
+        _context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken,
     ) {
         this._view = webviewView;
@@ -44,7 +44,7 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private _getHtmlForWebview(webview: vscode.Webview) {
+    private _getHtmlForWebview(_webview: vscode.Webview) {
         // Simple "Thin Path" HTML
         return `<!DOCTYPE html>
         <html lang="en">

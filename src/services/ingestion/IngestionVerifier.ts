@@ -1,7 +1,7 @@
 
 import * as vscode from 'vscode';
 import { ContextIngestionService } from './ContextIngestionService';
-import { IStorageService, EventRecord, ActionRecord, SessionRecord } from '../interfaces';
+import { IStorageService } from '../interfaces';
 
 export class IngestionVerifier {
     private outputChannel: vscode.OutputChannel;
@@ -40,7 +40,9 @@ export class IngestionVerifier {
                 const meta = JSON.parse(e.metadata);
                 // Check for new array format or old string format
                 return (meta.affectedFunctions && meta.affectedFunctions.length > 0) || meta.function !== undefined;
-            } catch (e) { return false; }
+            } catch {
+                return false;
+            }
         });
 
         if (functionEdits.length > 0) {
