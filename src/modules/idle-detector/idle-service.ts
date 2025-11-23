@@ -8,6 +8,13 @@ import { IAIService } from '../../services/interfaces';
 // Hardcoded idle threshold: 15 seconds exactly
 const DEFAULT_IDLE_THRESHOLD_MS = 15000;
 
+export interface IdleImprovementsResult {
+    summary: string;
+    tests: string[];
+    recommendations: Array<{ priority: 'high' | 'medium' | 'low'; message: string }>;
+    sessionId?: string;
+}
+
 export class IdleService implements IIdleService {
     private detector: IdleDetector;
     private lastSessionTime: number = Date.now();
@@ -16,6 +23,7 @@ export class IdleService implements IIdleService {
     private onIdleCallback?: () => Promise<void>;
     private aiService: IAIService | null = null;
     private workDoneWhileIdle: string[] = [];
+    private isHandlingIdle: boolean = false; // Prevent duplicate handling
 
     constructor(storage: IStorageService, config: IdleConfig = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, aiService?: IAIService) {
         this.detector = new IdleDetector(config);
@@ -43,59 +51,124 @@ export class IdleService implements IIdleService {
         this.onIdleCallback = callback;
     }
 
+    // Store references to orchestrator and autonomous agent
+    private orchestrator: any = null;
+    private autonomousAgent: any = null;
+
+    /**
+     * Set the orchestrator and autonomous agent for idle improvements workflow
+     */
+    setWorkflowServices(orchestrator: any, autonomousAgent: any): void {
+        this.orchestrator = orchestrator;
+        this.autonomousAgent = autonomousAgent;
+    }
+
     private async handleIdle(): Promise<void> {
         if (!this.isEnabled) { return; }
-        console.log('[IdleService] User went idle! Triggering autonomous work...');
+        
+        // Check if already handling idle to prevent duplicates
+        if (this.isHandlingIdle) {
+            console.log('[IdleService] Already handling idle, ignoring duplicate event');
+            return;
+        }
+
+        console.log('[IdleService] User went idle! Starting idle improvements workflow...');
         
         // Reset work tracker
         this.workDoneWhileIdle = [];
 
         try {
-            // Show notification
-            vscode.window.showInformationMessage('🤖 You went idle! Starting autonomous work...');
-
-            // Track autonomous work start
-            this.workDoneWhileIdle.push(`Started autonomous session at ${new Date().toLocaleTimeString()}`);
-
-            // Trigger the registered callback (autonomous agent)
+            // Silent operation - no blocking notifications
+            
+            // If orchestrator and autonomous agent are set, use new workflow
+            if (this.orchestrator && this.autonomousAgent) {
+                await this.handleIdleImprovements(this.orchestrator, this.autonomousAgent);
+            } else {
+                // Fallback to legacy callback if provided
             if (this.onIdleCallback) {
                 try {
                     await this.onIdleCallback();
-                    this.workDoneWhileIdle.push('✅ Completed linting');
-                    this.workDoneWhileIdle.push('✅ Generated tests');
                 } catch (error) {
-                    const errorMsg = error instanceof Error ? error.message : String(error);
-                    this.workDoneWhileIdle.push(`❌ Error: ${errorMsg}`);
+                        console.error('[IdleService] Legacy callback failed:', error);
+                    }
                 }
             }
 
-            // 1. Fetch events since last session
-            const recentEvents = await this.storage.getRecentEvents(100);
-            const newEvents = recentEvents.filter(e => e.timestamp > this.lastSessionTime);
-
-            if (newEvents.length === 0) {
-                console.log('[IdleService] No new events to summarize.');
-                return;
-            }
-
-            // 2. Generate Session Summary
-            const summary = await this.generateSessionSummary(newEvents);
-            const project = vscode.workspace.name || 'Unknown Project';
-
-            // 3. Create Session in DB
-            const session = await this.storage.createSession(summary, project);
-            console.log(`[IdleService] Created session: ${session.id} - ${session.summary}`);
-            
-            this.workDoneWhileIdle.push(`📊 Session summary: ${summary}`);
-
-            // 4. Update last session time
-            this.lastSessionTime = Date.now();
-
         } catch (error) {
             console.error('[IdleService] Error handling idle state:', error);
+                }
+            }
+
+    /**
+     * Main entry point for idle improvements workflow.
+     * Orchestrates the sequence but performs no work itself.
+     */
+    async handleIdleImprovements(
+        orchestrator: any, // Orchestrator instance
+        autonomousAgent: any // AutonomousAgent instance
+    ): Promise<IdleImprovementsResult | null> {
+        if (this.isHandlingIdle) {
+            console.log('[IdleService] Already handling idle improvements');
+            return null;
+            }
+
+        this.isHandlingIdle = true;
+
+        try {
+            console.log('[IdleService] Starting idle improvements workflow...');
+
+            // Step 1: Request Autonomous to create/switch to auto/idle-improvements branch
+            await autonomousAgent.ensureIdleBranch();
+
+            // Step 2: Request Orchestrator to collect and analyze context
+            const result = await orchestrator.analyzeForIdleImprovements();
+
+            // Step 3: Request Autonomous to store session/test artifacts in LanceDB
+            if (result) {
+                await autonomousAgent.storeIdleResults(result, this.storage);
+            }
+
+            // Step 4: Display results to user
+            if (result) {
+                this.displayIdleResults(result);
+            }
+
+            return result || null;
+
+        } catch (error) {
+            console.error('[IdleService] Idle improvements workflow failed:', error);
             const errorMsg = error instanceof Error ? error.message : String(error);
-            this.workDoneWhileIdle.push(`❌ Error: ${errorMsg}`);
+            vscode.window.showErrorMessage(`Idle improvements failed: ${errorMsg}`);
+            return null;
+        } finally {
+            this.isHandlingIdle = false;
         }
+    }
+
+    private displayIdleResults(result: IdleImprovementsResult): void {
+        // Display friendly summary and test suggestions
+        const message = [
+            `📋 **Idle Analysis Complete**`,
+            ``,
+            `**Summary:**`,
+            result.summary,
+            ``,
+            result.recommendations.length > 0 ? `**Recommendations:**` : '',
+            ...result.recommendations.slice(0, 3).map(r => `- [${r.priority.toUpperCase()}] ${r.message}`),
+            ``,
+            result.tests.length > 0 ? `✅ Generated ${result.tests.length} test file(s)` : ''
+        ].filter(Boolean).join('\n');
+
+        // Show notification without blocking
+        vscode.window.showInformationMessage(
+            `Idle analysis complete. Generated ${result.tests.length} test file(s) and ${result.recommendations.length} recommendations.`,
+            'View Details'
+        ).then(selection => {
+            if (selection === 'View Details') {
+                // Could open a webview or show in output channel
+                console.log('[IdleService] Idle improvements result:', message);
+        }
+        });
     }
 
     private handleActive(): void {

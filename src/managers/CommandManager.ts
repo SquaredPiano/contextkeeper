@@ -275,7 +275,7 @@ export class CommandManager {
       vscode.window.showInformationMessage(summary);
 
       // Speak it
-      if (this.voiceService.isEnabled()) {
+      if (this.voiceService && this.voiceService.isEnabled()) {
         await this.voiceService.speak(summary, 'professional');
       }
     } catch (error: any) {

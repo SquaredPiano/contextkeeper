@@ -38,7 +38,7 @@ describe('IdleService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     
-    service = new IdleService({ thresholdMs: 1000 });
+    service = new IdleService(storage as any, {thresholdMs: 1000 });
     
     // Get the mock instance created by the constructor
     mockDetectorInstance = (IdleDetector as any).mock.results[0].value;
@@ -93,7 +93,7 @@ describe('IdleService', () => {
       summarize: vi.fn().mockResolvedValue('AI-generated summary of your work session')
     };
     
-    const serviceWithAI = new IdleService({ thresholdMs: 1000 }, mockAIService as any);
+    const serviceWithAI = new IdleService(storage as any, { thresholdMs: 1000 }, mockAIService as any);
     await serviceWithAI.initialize();
     
     // Get the mock instance from the new service

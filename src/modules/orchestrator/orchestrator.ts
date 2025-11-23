@@ -108,8 +108,12 @@ export class Orchestrator extends EventEmitter {
    * Initialize pipeline. If no Gemini key, use mock mode for testing.
    */
   async initialize(): Promise<void> {
-    if (this.config.geminiApiKey) await this.geminiClient.initialize(this.config.geminiApiKey);
-    else this.geminiClient.enableMockMode();
+    if (this.config.geminiApiKey) {
+      // Explicitly use Gemini 2.0 Flash model
+      await this.geminiClient.initialize(this.config.geminiApiKey, "gemini-2.0-flash");
+    } else {
+      this.geminiClient.enableMockMode();
+    }
 
     try {
       await this.storage.connect();
@@ -753,5 +757,114 @@ export class Orchestrator extends EventEmitter {
     }
 
     return { totalFiles: files.length, filesWithIssues, totalIssues, overallRiskLevel: overall };
+  }
+
+  /**
+   * Idle improvements workflow:
+   * 1. Retrieve current context from VSCode (acts as "Cloudflare" current state)
+   * 2. Query LanceDB for similar sessions and actions
+   * 3. Merge both contexts
+   * 4. Send unified context to Gemini for tests + summary + recommendations (NO patches)
+   * 5. Return structured output
+   */
+  async analyzeForIdleImprovements(): Promise<import("../idle-detector/idle-service").IdleImprovementsResult | null> {
+    this.emit("idleAnalysisStarted");
+
+    try {
+      // Step 1: Collect current context (current codebase state)
+      const currentContext = await this.collectContext();
+      console.log("[Orchestrator] Collected current context for idle improvements");
+
+      // Step 2: Query LanceDB for similar sessions and actions
+      let historicalSessions: any[] = [];
+      let historicalActions: any[] = [];
+
+      try {
+        // Use active file or workspace root as query
+        const queryText = currentContext.files.activeFile 
+          ? `Working on ${currentContext.files.activeFile}` 
+          : currentContext.workspace.rootPath || "recent work";
+
+        // Query LanceDB for similar sessions and actions using embeddings
+        historicalSessions = await (this.storage as any).getSimilarSessions(queryText, 5);
+        historicalActions = await (this.storage as any).getSimilarActions(queryText, 5);
+
+        console.log(`[Orchestrator] Retrieved ${historicalSessions.length} similar sessions and ${historicalActions.length} similar actions from LanceDB`);
+      } catch (error) {
+        console.warn("[Orchestrator] Failed to query LanceDB for historical context:", error);
+        // Continue without historical context
+      }
+
+      // Step 3: Merge contexts - build unified context for Gemini
+      const unifiedContext = this.buildUnifiedIdleContext(currentContext, historicalSessions, historicalActions);
+
+      // Step 4: Send to Gemini with idle-specific prompt (tests + summary + recommendations only, NO patches)
+      if (!this.geminiClient.isReady()) {
+        console.warn("[Orchestrator] Gemini client not ready, skipping idle improvements");
+        return null;
+      }
+
+      const result = await this.geminiClient.generateIdleImprovements(unifiedContext);
+
+      // Step 5: Return structured output
+      this.emit("idleAnalysisComplete", result);
+      return result;
+
+    } catch (error) {
+      console.error("[Orchestrator] Idle improvements analysis failed:", error);
+      this.emit("idleAnalysisError", error);
+      return null;
+    }
+  }
+
+  /**
+   * Build unified context from current VSCode state + LanceDB historical data
+   */
+  private buildUnifiedIdleContext(
+    currentContext: CollectedContext,
+    historicalSessions: any[],
+    historicalActions: any[]
+  ): GeminiContext {
+    // Format historical sessions
+    const pastSessions = historicalSessions.map(s => ({
+      summary: s.summary || "",
+      timestamp: s.timestamp || Date.now()
+    }));
+
+    // Format historical actions
+    const pastActions = historicalActions.map(a => ({
+      description: a.description || "",
+      files: typeof a.files === 'string' ? JSON.parse(a.files) : (a.files || []),
+      timestamp: a.timestamp || Date.now()
+    }));
+
+    // Build git diff summary
+    let gitDiffSummary = "";
+    if (currentContext.git.uncommittedChanges && currentContext.git.uncommittedChanges.length > 0) {
+      gitDiffSummary = `Uncommitted changes in ${currentContext.git.uncommittedChanges.length} file(s)`;
+    } else if (currentContext.git.commits.length > 0) {
+      const recentCommit = currentContext.git.commits[0];
+      gitDiffSummary = `Recent commit: ${typeof recentCommit === 'string' ? recentCommit : (recentCommit.message || recentCommit.subject || '')}`;
+    }
+
+    // Build errors from file analysis
+    const errors: string[] = [];
+    // Could extract from currentContext files if needed
+
+    return {
+      activeFile: currentContext.files.activeFile || null,
+      recentCommits: currentContext.git.commits.slice(0, 10).map((c: any) => 
+        typeof c === 'string' ? c : (c.message || c.subject || '')
+      ),
+      recentErrors: errors,
+      gitDiffSummary,
+      editCount: currentContext.session.totalEdits,
+      relatedFiles: currentContext.files.openFiles.filter(f => f !== currentContext.files.activeFile),
+      relevantPastSessions: pastSessions,
+      // Additional context
+      projectStructure: undefined, // Could be added if needed
+      dependencies: undefined, // Could be added if needed
+      userIntent: `Idle improvements analysis for workspace at ${currentContext.workspace.rootPath || 'unknown'}`
+    };
   }
 }
