@@ -16,4 +16,5 @@ vsc-extension-quickstart.md
 .env*
 .DS_Store
 dist/
-*.env
+*.envtests/
+*.log
