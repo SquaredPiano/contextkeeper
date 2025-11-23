@@ -58,7 +58,7 @@ async function verifyCloudConnection() {
       session_id: session.id,
       timestamp: Date.now(),
       description: 'Tested cloud connection and verified that embeddings are being generated and stored correctly',
-      diff: '+ verified cloud connection\n+ tested embeddings',
+      code_context: JSON.stringify({ changes: [], relatedFunctions: [], imports: [], relatedFiles: [] }),
       files: JSON.stringify(['/test/verification.ts'])
     });
     console.log('   ✅ Action logged successfully');

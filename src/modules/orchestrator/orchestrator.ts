@@ -791,108 +791,126 @@ export class Orchestrator extends EventEmitter {
       const currentContext = await this.collectContext();
       console.log("[Orchestrator] Collected current context for idle improvements");
 
-      // Step 2: Query LanceDB for RELEVANT historical context using AST-PARSED symbols
-      // NOT generic queries - use actual function/class names from DocumentSymbol API
+      // Step 2: Query LanceDB for RELEVANT historical context using RECENT ACTIONS
+      // NOT generic queries - use actual recent work descriptions
       let historicalSessions: Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }> = [];
-      let historicalActions: Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }> = [];
+      let historicalActions: Array<{ actionId: string; description: string; timestamp: string; code_context?: string; metadata?: unknown }> = [];
+      
+      // CRITICAL: Fetch RECENT EVENTS with RICH CODE CONTEXT
+      let recentCodeContext: Array<{ file: string; function?: string; code: string; timestamp: number }> = [];
 
       if (currentContext.files.activeFile && currentContext.files.activeFileContent) {
         try {
-          // Extract specific identifiers using AST parsing (VS Code DocumentSymbol API)
-          const fileName = currentContext.files.activeFile.split('/').pop() || '';
-          const activeEditor = vscode.window.activeTextEditor;
-          
-          let identifiers: string[] = [];
-          
-          if (activeEditor && activeEditor.document.fileName === currentContext.files.activeFile) {
-            // Use VS Code's DocumentSymbol API to get proper AST symbols
-            const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
-              'vscode.executeDocumentSymbolProvider',
-              activeEditor.document.uri
-            );
+          // CRITICAL: Fetch recent events from database with RICH metadata
+          try {
+            const events = await (this.storage as unknown as { getRecentEvents: (limit: number) => Promise<Array<{ event_type: string; file_path: string; timestamp: number; metadata: string }>> }).getRecentEvents(20);
             
-            if (symbols && symbols.length > 0) {
-              // Extract function and class names from symbols
-              const extractSymbolNames = (syms: vscode.DocumentSymbol[]): string[] => {
-                const names: string[] = [];
-                for (const sym of syms) {
-                  // Only include functions, classes, methods, and interfaces
-                  if (
-                    sym.kind === vscode.SymbolKind.Function ||
-                    sym.kind === vscode.SymbolKind.Class ||
-                    sym.kind === vscode.SymbolKind.Method ||
-                    sym.kind === vscode.SymbolKind.Interface
-                  ) {
-                    names.push(sym.name);
+            console.log(`[Orchestrator] 📊 Fetched ${events.length} recent events from database`);
+            
+            // Parse rich metadata from events and extract code context
+            for (const event of events) {
+              if (event.event_type === 'file_edit' && event.metadata) {
+                try {
+                  const metadata = JSON.parse(event.metadata) as import('../../services/storage/schema').FileEditMetadata;
+                  
+                  // Extract code from each change
+                  for (const change of metadata.changes || []) {
+                    if (change.affectedFunction) {
+                      recentCodeContext.push({
+                        file: event.file_path,
+                        function: change.affectedFunction.name,
+                        code: change.affectedFunction.fullBody,
+                        timestamp: event.timestamp
+                      });
+                    } else if (change.addedText) {
+                      // Include the added text with surrounding context
+                      const codeSnippet = [
+                        change.contextBefore ? `// Context before:\n${change.contextBefore.substring(0, 200)}` : '',
+                        change.addedText,
+                        change.contextAfter ? `// Context after:\n${change.contextAfter.substring(0, 200)}` : ''
+                      ].filter(Boolean).join('\n');
+                      
+                      recentCodeContext.push({
+                        file: event.file_path,
+                        code: codeSnippet,
+                        timestamp: event.timestamp
+                      });
+                    }
                   }
-                  // Recursively extract from children
-                  if (sym.children && sym.children.length > 0) {
-                    names.push(...extractSymbolNames(sym.children));
+                  
+                  // Include full file content if available
+                  if (metadata.fullFileContent && event.file_path === currentContext.files.activeFile) {
+                    console.log(`[Orchestrator] 📄 Found full file content for ${event.file_path}`);
                   }
+                } catch (parseError) {
+                  console.warn(`[Orchestrator] Failed to parse event metadata:`, parseError);
                 }
-                return names;
-              };
+              }
+            }
+            
+            console.log(`[Orchestrator] 🔍 Extracted ${recentCodeContext.length} code snippets from recent events`);
+          } catch (error) {
+            console.warn('[Orchestrator] Failed to fetch recent events:', error);
+          }
+          
+          // Build query from RECENT ACTION DESCRIPTIONS, not AST symbols
+          // Get last 5 actions and use their descriptions for semantic search
+          try {
+            const recentActions = await (this.storage as unknown as { getRecentActions: (limit: number) => Promise<Array<{ description: string; timestamp: number }>> }).getRecentActions(5);
+            
+            if (recentActions.length > 0) {
+              // Use the most recent action descriptions as the search query
+              const recentWork = recentActions.map(a => a.description).join('. ');
+              const fileName = currentContext.files.activeFile.split('/').pop() || '';
+              const specificQuery = `${fileName}: ${recentWork.substring(0, 200)}`;
               
-              identifiers = extractSymbolNames(symbols).slice(0, 5); // Top 5 symbols
-              console.log(`[Orchestrator] Extracted ${identifiers.length} symbols from AST:`, identifiers);
+              console.log(`[Orchestrator] 🔍 Vector search query from recent actions: "${specificQuery.substring(0, 100)}..."`);
+
+              // Query with the SPECIFIC context from actual work
+              historicalSessions = await (this.storage as unknown as { getSimilarSessions: (query: string, limit: number) => Promise<Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }>> }).getSimilarSessions(specificQuery, 3);
+              historicalActions = await (this.storage as unknown as { getSimilarActions: (query: string, limit: number) => Promise<Array<{ actionId: string; description: string; timestamp: string; code_context?: string; metadata?: unknown }>> }).getSimilarActions(specificQuery, 3);
+
+              console.log(`[Orchestrator] 📊 Vector search results: ${historicalSessions.length} sessions, ${historicalActions.length} actions (before filtering)`);
+
+              // Filter results by time relevance - prioritize current session, then recent (past 24 hours)
+              const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+              const now = Date.now();
+              
+              historicalSessions = historicalSessions.filter((s) => {
+                const timestamp = typeof s.timestamp === 'string' ? Date.parse(s.timestamp) : s.timestamp;
+                const isRecent = timestamp && (now - timestamp) < ONE_DAY_MS;
+                const hasScore = (s as { _distance?: number })._distance !== undefined;
+                const isRelevant = !hasScore || ((s as unknown as { _distance: number })._distance >= 0.6); // Lower threshold for 24h window
+                
+                if (!isRecent) {
+                  console.log(`[Orchestrator] ❌ Filtered out old session (timestamp: ${s.timestamp})`);
+                } else if (hasScore && !isRelevant) {
+                  console.log(`[Orchestrator] ❌ Filtered out low-relevance session (score: ${(s as { _distance?: number })._distance})`);
+                }
+                
+                return isRecent && isRelevant;
+              });
+              
+              historicalActions = historicalActions.filter((a) => {
+                const timestamp = typeof a.timestamp === 'string' ? Date.parse(a.timestamp) : a.timestamp;
+                const isRecent = timestamp && (now - timestamp) < ONE_DAY_MS;
+                const hasScore = (a as { _distance?: number })._distance !== undefined;
+                const isRelevant = !hasScore || ((a as unknown as { _distance: number })._distance >= 0.6);
+                
+                return isRecent && isRelevant;
+              });
+
+              console.log(`[Orchestrator] ✅ After filtering: ${historicalSessions.length} relevant sessions, ${historicalActions.length} relevant actions`);
+              
+              if (historicalSessions.length === 0 && historicalActions.length === 0) {
+                console.log(`[Orchestrator] ⚠️  No relevant historical context found - proceeding with current context only`);
+              }
+            } else {
+              console.log('[Orchestrator] No recent actions found - skipping historical search');
             }
-          }
-          
-          // Fallback: if no symbols found, skip historical search (better than generic queries)
-          if (identifiers.length === 0) {
-            console.log('[Orchestrator] No AST symbols found - skipping historical search to avoid irrelevant results');
-            return null;
-          }
-          
-          // Build SPECIFIC query from AST-parsed identifiers
-          const specificQuery = `${fileName} ${identifiers.join(' ')}`;
-          
-          console.log(`[Orchestrator] 🔍 Vector search query: "${specificQuery}"`);
-
-          // Query with the SPECIFIC context
-          historicalSessions = await (this.storage as unknown as { getSimilarSessions: (query: string, limit: number) => Promise<Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }>> }).getSimilarSessions(specificQuery, 3);
-          historicalActions = await (this.storage as unknown as { getSimilarActions: (query: string, limit: number) => Promise<Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }>> }).getSimilarActions(specificQuery, 3);
-
-          console.log(`[Orchestrator] 📊 Vector search results: ${historicalSessions.length} sessions, ${historicalActions.length} actions (before filtering)`);
-
-          // Filter results by semantic similarity threshold (0.7+) and time window (1 hour)
-          const ONE_HOUR_MS = 60 * 60 * 1000;
-          const now = Date.now();
-          
-          historicalSessions = historicalSessions.filter((s) => {
-            const timestamp = typeof s.timestamp === 'string' ? Date.parse(s.timestamp) : s.timestamp;
-            const isRecent = timestamp && (now - timestamp) < ONE_HOUR_MS;
-            const hasScore = (s as { _distance?: number })._distance !== undefined;
-            const isRelevant = !hasScore || ((s as unknown as { _distance: number })._distance >= 0.7); // Higher score = more similar
-            
-            if (!isRecent) {
-              console.log(`[Orchestrator] ❌ Filtered out old session (timestamp: ${s.timestamp})`);
-            } else if (hasScore && !isRelevant) {
-              console.log(`[Orchestrator] ❌ Filtered out low-relevance session (score: ${(s as { _distance?: number })._distance})`);
-            }
-            
-            return isRecent && isRelevant;
-          });
-          
-          historicalActions = historicalActions.filter((a) => {
-            const timestamp = typeof a.timestamp === 'string' ? Date.parse(a.timestamp) : a.timestamp;
-            const isRecent = timestamp && (now - timestamp) < ONE_HOUR_MS;
-            const hasScore = (a as { _distance?: number })._distance !== undefined;
-            const isRelevant = !hasScore || ((a as unknown as { _distance: number })._distance >= 0.7);
-            
-            if (!isRecent) {
-              console.log(`[Orchestrator] ❌ Filtered out old action (timestamp: ${a.timestamp})`);
-            } else if (hasScore && !isRelevant) {
-              console.log(`[Orchestrator] ❌ Filtered out low-relevance action (score: ${(a as { _distance?: number })._distance})`);
-            }
-            
-            return isRecent && isRelevant;
-          });
-
-          console.log(`[Orchestrator] ✅ After filtering: ${historicalSessions.length} relevant sessions, ${historicalActions.length} relevant actions`);
-          
-          if (historicalSessions.length === 0 && historicalActions.length === 0) {
-            console.log(`[Orchestrator] ⚠️  No relevant historical context found - proceeding with current context only`);
+          } catch (error) {
+            console.warn("[Orchestrator] Failed to query historical context:", error);
+            // Continue without historical context
           }
         } catch (error) {
           console.warn("[Orchestrator] Failed to query historical context:", error);
@@ -902,9 +920,8 @@ export class Orchestrator extends EventEmitter {
         console.log('[Orchestrator] No active file - skipping historical context search');
       }
 
-      // Step 3: Merge contexts - build unified context for Gemini
-      // Historical context now includes ONLY relevant past work on same files/functions
-      const unifiedContext = await this.buildUnifiedIdleContext(currentContext, historicalSessions, historicalActions);
+      // Step 3: Merge contexts with RICH CODE CONTEXT from recent events
+      const unifiedContext = await this.buildUnifiedIdleContext(currentContext, historicalSessions, historicalActions, recentCodeContext);
 
       // Step 4: Send to Gemini with idle-specific prompt (tests + summary + recommendations only, NO patches)
       if (!this.geminiClient.isReady()) {
@@ -926,12 +943,13 @@ export class Orchestrator extends EventEmitter {
   }
 
   /**
-   * Build unified context from current VSCode state + LanceDB historical data
+   * Build unified context from current VSCode state + LanceDB historical data + rich code context
    */
   private async buildUnifiedIdleContext(
     currentContext: CollectedContext,
     historicalSessions: Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }>,
-    _historicalActions: Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }>
+    _historicalActions: Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }>,
+    recentCodeContext: Array<{ file: string; function?: string; code: string; timestamp: number }>
   ): Promise<GeminiContext> {
     // Format historical sessions - ONLY if they exist and are relevant
     const pastSessions = historicalSessions.length > 0 ? historicalSessions.map(s => ({
@@ -976,13 +994,35 @@ export class Orchestrator extends EventEmitter {
     
     // REMOVED: recentlyEdited files - they're not being populated anymore and caused irrelevant context
 
+    // Format recent code context into a readable summary
+    let recentCodeSummary = '';
+    if (recentCodeContext.length > 0) {
+      const groupedByFile = recentCodeContext.reduce((acc, ctx) => {
+        if (!acc[ctx.file]) {
+          acc[ctx.file] = [];
+        }
+        acc[ctx.file].push(ctx);
+        return acc;
+      }, {} as Record<string, typeof recentCodeContext>);
+      
+      const fileSummaries = Object.entries(groupedByFile)
+        .slice(0, 3) // Top 3 most recently edited files
+        .map(([file, contexts]) => {
+          const functions = contexts.filter(c => c.function).map(c => c.function).filter((f, i, arr) => arr.indexOf(f) === i);
+          const codeSnippets = contexts.slice(0, 2).map(c => `\n${c.code.substring(0, 300)}`).join('\n---\n');
+          return `File: ${file}${functions.length > 0 ? ` (edited functions: ${functions.join(', ')})` : ''}${codeSnippets}`;
+        });
+      
+      recentCodeSummary = fileSummaries.join('\n\n');
+    }
+    
     return {
       activeFile: currentContext.files.activeFile || null,
       recentCommits: currentContext.git.commits.slice(0, 3).map((c) => 
         typeof c === 'string' ? c : (c.message || '')
       ),
       recentErrors: [],
-      gitDiffSummary,
+      gitDiffSummary: recentCodeSummary || gitDiffSummary, // Use actual code context if available, otherwise git diff
       editCount: currentContext.session.totalEdits || 0,
       relatedFiles: currentContext.files.openFiles.filter(f => f !== currentContext.files.activeFile).slice(0, 5),
       relevantPastSessions: pastSessions, // Now includes relevant historical context

@@ -151,6 +151,44 @@ export class LanceDBStorage implements IStorageService {
     return session;
   }
 
+  async updateSessionSummary(sessionId: string, summary: string, embedding: number[]): Promise<void> {
+    if (!this.sessionsTable) { throw new Error('Sessions table not initialized'); }
+
+    console.log(`[LanceDBStorage] Updating session ${sessionId} with new summary (${summary.substring(0, 100)}...)`);
+    
+    try {
+      // LanceDB update: fetch existing record, modify it, then update
+      const results = await this.sessionsTable
+        .query()
+        .where(`id = '${sessionId}'`)
+        .limit(1)
+        .toArray();
+
+      if (results.length === 0) {
+        console.warn(`[LanceDBStorage] Session ${sessionId} not found for update`);
+        return;
+      }
+
+      const existingSession = results[0] as SessionRecord;
+      const updatedSession: SessionRecord = {
+        ...existingSession,
+        summary,
+        embedding,
+        timestamp: Date.now() // Update timestamp to mark when summary was added
+      };
+
+      // Delete old record and insert updated one
+      await this.sessionsTable.delete(`id = '${sessionId}'`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await this.sessionsTable.add([updatedSession as any]);
+      
+      console.log(`[LanceDBStorage] ✅ Session summary updated successfully`);
+    } catch (error) {
+      console.error(`[LanceDBStorage] Failed to update session summary:`, error);
+      throw error;
+    }
+  }
+
   async addAction(action: Omit<ActionRecord, 'id' | 'embedding'>): Promise<void> {
     if (!this.actionsTable) { throw new Error('Actions table not initialized'); }
 
@@ -160,6 +198,7 @@ export class LanceDBStorage implements IStorageService {
       id: uuidv4(),
       ...action,
       embedding,
+      code_context: typeof action.code_context === 'string' ? action.code_context : JSON.stringify(action.code_context || '{}'),
       files: typeof action.files === 'string' ? action.files : JSON.stringify(action.files || [])
     };
 

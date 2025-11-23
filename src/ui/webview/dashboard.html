@@ -1077,9 +1077,17 @@
 
 		let _autoTimer = null;
 		function scheduleAutoAnalysis(seconds){
+			// DISABLED: Auto-analysis timer conflicts with idle detection
+			// The idle detector handles autonomous analysis when user is idle
+			if (_autoTimer) clearInterval(_autoTimer);
+			_autoTimer = null;
+			return;
+			
+			/* OLD CODE - kept for reference
 			if (_autoTimer) clearInterval(_autoTimer);
 			if (!Number.isFinite(seconds) || seconds <= 0) return;
 			_autoTimer = setInterval(()=>{ vscode.postMessage({ type: 'triggerAnalysis' }); }, seconds * 1000);
+			*/
 		}
 
 		function handleAutonomyChange(value) {
@@ -1292,7 +1300,7 @@
 			
 			const summaryEl = document.getElementById('analysisSummary');
 			if (summaryEl) {
-				summaryEl.textContent = `🎯 While you were away: ${summary}`;
+				summaryEl.textContent = `While you were away: ${summary}`;
 			}
 			
 			const changes = [];
