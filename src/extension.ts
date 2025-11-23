@@ -16,6 +16,7 @@ import { registerTestCommand } from './test/test-autonomous-pipeline';
 import { AICodeActionProvider } from './services/AICodeActionProvider';
 import { TestFileGenerator } from './utils/testFileGenerator';
 import { SurgicalLintFixer } from './services/SurgicalLintFixer';
+import { Orchestrator } from './modules/orchestrator/orchestrator';
 
 // Import real services
 import { ContextService } from './services/real/ContextService';
@@ -64,7 +65,7 @@ let ingestionService: ContextIngestionService;
 let idleService: IdleService;
 let autonomousAgent: AutonomousAgent;
 let codeActionProvider: AICodeActionProvider;
-let orchestrator: import('./modules/orchestrator/orchestrator').Orchestrator | null = null; // Global orchestrator reference for AI edits tracking
+let orchestrator: Orchestrator | null = null; // Global orchestrator reference for AI edits tracking
 
 // State
 let currentContext: DeveloperContext | null = null;
@@ -307,32 +308,41 @@ export async function activate(context: vscode.ExtensionContext) {
       maxFilesToAnalyze: 10
     };
     
-    // Only initialize Orchestrator if we have required config
-    if (cloudflareWorkerUrl && geminiApiKey) {
+    // Initialize Orchestrator even without Cloudflare (will work without vector search)
+    if (geminiApiKey) {
       try {
-        const orchestratorModule = await import('./modules/orchestrator/orchestrator.js');
-        const { Orchestrator } = orchestratorModule;
-        orchestrator = new Orchestrator(orchestratorConfig);
-        await orchestrator.initialize();
-        console.log('Orchestrator initialized for idle improvements');
+        const orch = new Orchestrator(orchestratorConfig);
+        await orch.initialize();
+        orchestrator = orch; // Only assign after successful initialization
+        console.log('[Extension] ✅ Orchestrator initialized for idle improvements');
       } catch (error) {
-        console.warn('Failed to initialize Orchestrator:', error);
+        console.error('[Extension] ❌ Failed to initialize Orchestrator:', error);
+        console.error('[Extension] Stack trace:', error instanceof Error ? error.stack : 'No stack trace');
         orchestrator = null;
       }
     } else {
-      console.warn('Orchestrator not initialized: missing cloudflare.workerUrl or gemini.apiKey');
+      console.error('[Extension] ❌ Orchestrator not initialized: missing gemini.apiKey');
+      orchestrator = null;
     }
 
     // 6. Initialize Idle Detection Service
     const autonomousEnabled = config.get<boolean>('autonomous.enabled', true);
     
-    idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService, voiceService); // 15 seconds threshold
-    
-    // Wire up autonomous features if enabled
-    if (autonomousEnabled) {
-      // If we have orchestrator, use the full workflow
-      if (orchestrator && autonomousAgent) {
-        console.log('[Extension] Wiring up full autonomous workflow with orchestrator');
+    // CRITICAL: Only initialize IdleService if orchestrator is available
+    if (!orchestrator) {
+      console.error('[Extension] ❌ Cannot initialize IdleService: Orchestrator not available');
+      console.error('[Extension] ❌ Idle detection pipeline is DISABLED');
+      console.error('[Extension] Please ensure GEMINI_API_KEY is configured in .env.local');
+    } else if (!autonomousEnabled) {
+      console.warn('[Extension] ⚠️  Autonomous mode disabled by user settings');
+    } else {
+      // Initialize IdleService only when orchestrator is ready
+      idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService, voiceService);
+      console.log('[Extension] ✅ IdleService created with 15s threshold');
+      
+      // Wire up full autonomous workflow
+      if (autonomousAgent) {
+        console.log('[Extension] 🔗 Wiring up full autonomous workflow with orchestrator');
         idleService.setWorkflowServices(orchestrator, autonomousAgent);
         
         // Wire up UI callback to display idle improvements
@@ -365,31 +375,15 @@ export async function activate(context: vscode.ExtensionContext) {
             console.error('[Extension] Failed to send idle improvements to UI:', error);
           }
         });
+        
+        // Initialize and start idle detection
+        await idleService.initialize();
+        context.subscriptions.push(idleService);
+        console.log('[Extension] ✅ Idle detection pipeline ACTIVE');
       } else {
-        // Fallback: Basic idle notification without full orchestrator workflow
-        console.log('[Extension] Orchestrator not available, using basic idle workflow');
-        idleService.onIdle(async () => {
-          console.log('[Extension] Idle detected - running basic analysis');
-          try {
-            // Get current context and run analysis
-            await refreshContext();
-            const editor = vscode.window.activeTextEditor;
-            if (editor && currentContext) {
-              const code = editor.document.getText();
-              const analysis = await aiService.analyze(code, currentContext);
-              recordChange(`Idle analysis: Found ${analysis.issues.length} issues`, 'idle-analysis', 'autonomous');
-            }
-          } catch (error) {
-            console.error('[Extension] Idle analysis failed:', error);
-          }
-        });
+        console.error('[Extension] ❌ AutonomousAgent not available - cannot initialize idle workflow');
       }
-    } else {
-      console.log('[Extension] Autonomous mode disabled by user');
     }
-    
-    await idleService.initialize();
-    context.subscriptions.push(idleService);
 
     // Register Test Command
     registerTestCommand(context);

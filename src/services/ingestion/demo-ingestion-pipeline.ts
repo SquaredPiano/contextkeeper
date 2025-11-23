@@ -115,7 +115,7 @@ async function runDemo() {
                 session_id: sessionId,
                 timestamp: Date.now() - 3500,
                 description: 'User modified login authentication flow to add rate limiting',
-                diff: JSON.stringify([{ range: '15-20', textLength: 120 }]),
+                code_context: JSON.stringify({ changes: [], relatedFunctions: [], imports: [], relatedFiles: [] }),
                 files: JSON.stringify(['src/auth/login.ts'])
             }
         },
@@ -147,7 +147,7 @@ async function runDemo() {
                 session_id: sessionId,
                 timestamp: Date.now() - 1500,
                 description: 'User added JWT token validation in authentication middleware',
-                diff: JSON.stringify([{ range: '30-35', textLength: 85 }]),
+                code_context: JSON.stringify({ changes: [], relatedFunctions: [], imports: [], relatedFiles: [] }),
                 files: JSON.stringify(['src/auth/middleware.ts'])
             }
         },
@@ -171,7 +171,7 @@ async function runDemo() {
                 session_id: sessionId,
                 timestamp: Date.now() - 500,
                 description: 'User committed changes: feat: add rate limiting to login endpoint',
-                diff: '',
+                code_context: JSON.stringify({ changes: [], relatedFunctions: [], imports: [], relatedFiles: [] }),
                 files: JSON.stringify(['src/auth/login.ts', 'src/auth/middleware.ts'])
             }
         }

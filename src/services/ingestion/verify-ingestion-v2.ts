@@ -23,23 +23,16 @@ async function verifyActionIngestion() {
         const actions: Omit<ActionRecord, 'id' | 'embedding'>[] = [
             {
                 session_id: 'session-1',
-                timestamp: Date.now() - 5000,
-                description: 'User edited src/utils/helper.ts. Fixed a bug in the date formatter.',
-                diff: '...',
-                files: JSON.stringify(['src/utils/helper.ts'])
-            },
-            {
-                session_id: 'session-1',
                 timestamp: Date.now() - 2000,
-                description: 'User edited src/components/Button.tsx. Added a new onClick handler.',
-                diff: '...',
+                description: 'User edited src/components/Button.tsx. Added a click handler.',
+                code_context: JSON.stringify({ changes: [], relatedFunctions: [], imports: [], relatedFiles: [] }),
                 files: JSON.stringify(['src/components/Button.tsx'])
             },
             {
                 session_id: 'session-1',
                 timestamp: Date.now() - 1000,
                 description: 'User edited src/api/client.ts. Refactored the fetch logic.',
-                diff: '...',
+                code_context: JSON.stringify({ changes: [], relatedFunctions: [], imports: [], relatedFiles: [] }),
                 files: JSON.stringify(['src/api/client.ts'])
             }
         ];
