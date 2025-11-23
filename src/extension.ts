@@ -66,6 +66,7 @@ let idleService: IdleService;
 let autonomousAgent: AutonomousAgent;
 let codeActionProvider: AICodeActionProvider;
 let orchestrator: Orchestrator | null = null; // Global orchestrator reference for AI edits tracking
+let sessionManager: SessionManager; // Session manager for tracking work sessions
 
 // State
 let currentContext: DeveloperContext | null = null;
@@ -137,7 +138,7 @@ export async function activate(context: vscode.ExtensionContext) {
     console.log("Storage Service initialized");
     
     contextService = new ContextService(storageService, aiService);
-    const sessionManager = new SessionManager(storageService);
+    sessionManager = new SessionManager(storageService);
 
     // Initialize Session (Async)
     await sessionManager.initialize();
@@ -337,7 +338,7 @@ export async function activate(context: vscode.ExtensionContext) {
       console.warn('[Extension] ⚠️  Autonomous mode disabled by user settings');
     } else {
       // Initialize IdleService only when orchestrator is ready
-      idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService, voiceService);
+      idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService, voiceService, sessionManager);
       console.log('[Extension] ✅ IdleService created with 15s threshold');
       
       // Wire up full autonomous workflow
@@ -896,8 +897,19 @@ async function deleteCopilotBranch(branchName: string): Promise<void> {
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {
+export async function deactivate() {
   console.log('Autonomous Copilot extension is being deactivated');
+  
+  // Finalize session before shutdown
+  if (sessionManager) {
+    try {
+      await sessionManager.finalizeSession();
+      console.log('[Extension] Session finalized on deactivate');
+    } catch (error) {
+      console.error('[Extension] Failed to finalize session:', error);
+    }
+  }
+  
   // Clean up linting service
   // if (lintingService) {
   //     lintingService.dispose();

@@ -232,30 +232,46 @@ CRITICAL: In the "fixedCode" field, you MUST return the exact original code that
     return `
 You MUST respond with ONLY valid JSON. No explanations, no markdown, no conversational text.
 
-WHAT THE USER WAS JUST WORKING ON:
-- Currently open file: ${context.activeFile || "Unknown"}
-- Other files they had open: ${relatedFilesStr}
-- Number of edits made: ${context.editCount}
-- Recent git activity:
-  ${commitsStr}
-- Uncommitted changes: ${context.gitDiffSummary || "No uncommitted changes"}
+==== WHAT THE USER WAS ACTUALLY DOING (THEIR RECENT CODE CHANGES) ====
+${context.gitDiffSummary}
 
-HISTORICAL CONTEXT (for reference):
+==== CURRENT WORKSPACE STATE ====
+- Currently editing: ${context.activeFile || "Unknown"}
+- Other open files: ${relatedFilesStr}
+- Number of edits made: ${context.editCount}
+- Recent commits:
+  ${commitsStr}
+
+==== HISTORICAL CONTEXT (for reference only) ====
 ${pastSessionsStr || "No previous sessions"}
 
-TASK: Analyze what the user was ACTUALLY working on based on their open files and recent edits. Focus your summary on THEIR RECENT WORK, not generic code issues.
+==== YOUR TASK ====
+Based on the ACTUAL CODE CHANGES shown above (in "WHAT THE USER WAS ACTUALLY DOING"), write a summary that describes:
+1. What file/function they were working on
+2. What kind of changes they made (adding features, fixing bugs, refactoring, etc.)
+3. What the code change was trying to accomplish
+
+DO NOT talk about issues or problems unless that's clearly what they were working on.
+DO NOT give generic summaries like "working on a file" - be SPECIFIC about what they changed.
+USE the actual code snippets above to understand their work.
+
+EXAMPLE GOOD SUMMARY:
+"While you were away, I noticed you were working on the CanvasPage component in page.tsx, specifically adding TanStack Query integration for data fetching and implementing upload zones for multiple file types (notes, flashcards, quizzes, slides). You added Framer Motion animations and integrated with your backend API to fetch project data."
+
+EXAMPLE BAD SUMMARY:
+"While you were away, you were working on page.tsx and made some changes to the code."
 
 RESPOND WITH THIS EXACT JSON STRUCTURE:
 
 {
-  "summary": "Start with: 'While you were away, I noticed you were working on [describe what they were ACTUALLY editing based on active file and commits]. Here's what I found...' Then provide 2-3 sentences about their specific work context and what might be helpful.",
+  "summary": "While you were away, I noticed you were working on [BE SPECIFIC: file name, function name, line numbers]. [Describe the ACTUAL changes they made based on the code above]. [What were they trying to accomplish?]",
   "tests": [
-    "// Complete test file content as string - generate tests for the files they were ACTUALLY editing"
+    "// Complete test file content as string - generate tests for the SPECIFIC functions/components they edited"
   ],
   "recommendations": [
     {
-      "priority": "high",
-      "message": "Specific recommendation related to what they were working on"
+      "priority": "high" | "medium" | "low",
+      "message": "Specific, actionable recommendation related to their actual work"
     }
   ]
 }
@@ -263,11 +279,11 @@ RESPOND WITH THIS EXACT JSON STRUCTURE:
 CRITICAL RULES:
 1. Response must be ONLY valid JSON
 2. No markdown code blocks (no \`\`\`)
-3. No conversational text before or after JSON
-4. No code patches or fixes
-5. Tests should be complete test files as strings
-6. Recommendations must be actionable but not include code
+3. Summary must reference ACTUAL code changes from above
+4. Tests should be for the SPECIFIC code they edited
+5. Recommendations must be contextual to their work
+6. FOCUS on describing their WORK, not critiquing it
 
-RESPOND WITH JSON ONLY:`.trim();
+GENERATE THE JSON NOW:`.trim();
   }
 }

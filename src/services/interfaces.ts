@@ -211,6 +211,7 @@ export interface IStorageService {
 	connect(embeddingService?: IEmbeddingService): Promise<void>;
 	logEvent(event: Omit<EventRecord, 'id'>): Promise<void>;
 	createSession(summary: string, project: string): Promise<SessionRecord>;
+	updateSessionSummary(sessionId: string, summary: string, embedding: number[]): Promise<void>;
 	addAction(action: Omit<ActionRecord, 'id' | 'embedding'>): Promise<void>;
 	getLastSession(): Promise<SessionRecord | null>;
 	getSimilarSessions(query: string, topK?: number): Promise<SessionRecord[]>;
