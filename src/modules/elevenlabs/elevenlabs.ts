@@ -41,7 +41,14 @@ export class ElevenLabsService implements IVoiceService {
   }
 
   isEnabled(): boolean {
-    return this.initialized || this.fallbackMode;
+    const globalVoice = vscode.workspace.getConfiguration('copilot').get('voice.enabled', true);
+    const elevenEnabled = vscode.workspace.getConfiguration('copilot').get('voice.elevenEnabled', true);
+    return (this.initialized || this.fallbackMode) && globalVoice && elevenEnabled;
+  }
+
+  setEnabled(enabled: boolean): void {
+    // Update the setting
+    vscode.workspace.getConfiguration('copilot').update('voice.elevenEnabled', enabled, true);
   }
 
   async speak(text: string, voiceStyle?: 'casual' | 'professional' | 'encouraging'): Promise<void> {

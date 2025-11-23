@@ -59,18 +59,28 @@ export class AutonomousAgent {
                             ''
                         ].join('\n');
                         
-                        // Add lint report to top of file
-                        const edit = new vscode.WorkspaceEdit();
-                        edit.insert(document.uri, new vscode.Position(0, 0), lintReport);
-                        await vscode.workspace.applyEdit(edit);
-                        await document.save();
+                        // SAFETY: Don't modify user's code files - just log the lint report
+                        // Adding comments to files can break code, so we'll just log it
+                        console.log(`[AutonomousAgent] Lint Report for ${fileName}:`);
+                        console.log(lintReport);
                         
-                        // Commit the lint report
-                        const relativePath = vscode.workspace.asRelativePath(fileName);
-                        await this.gitService.commit(
-                            `chore: Add lint report for ${relativePath} (${results.length} issues)`,
-                            [fileName]
+                        // Show notification instead of modifying file
+                        vscode.window.showInformationMessage(
+                            `Found ${results.length} lint issues in ${vscode.workspace.asRelativePath(fileName)}. Check output channel for details.`
                         );
+                        
+                        // DO NOT modify the user's code file - this was overwriting code
+                        // const edit = new vscode.WorkspaceEdit();
+                        // edit.insert(document.uri, new vscode.Position(0, 0), lintReport);
+                        // await vscode.workspace.applyEdit(edit);
+                        // await document.save();
+                        
+                        // Don't commit changes to user's files
+                        // const relativePath = vscode.workspace.asRelativePath(fileName);
+                        // await this.gitService.commit(
+                        //     `chore: Add lint report for ${relativePath} (${results.length} issues)`,
+                        //     [fileName]
+                        // );
                         
                         console.log('[AutonomousAgent] Lint report committed');
                     } else {
@@ -198,21 +208,24 @@ export class AutonomousAgent {
             const fix = await this.aiService.fixError(fullCode, `${error.message} at line ${range.start.line + 1}`);
 
             if (fix && fix.fixedCode) {
-                // Apply the fix
-                const edit = new vscode.WorkspaceEdit();
-                const fullRange = new vscode.Range(
-                    document.positionAt(0),
-                    document.positionAt(fullCode.length)
-                );
+                // SAFETY: Don't overwrite entire files - this is too dangerous
+                // Instead, just log the suggested fix
+                console.log(`[AutonomousAgent] Auto-Fix suggested for "${error.message}":`);
+                console.log(`[AutonomousAgent] Suggested fix code:\n${fix.fixedCode.substring(0, 200)}...`);
+                
+                vscode.window.showWarningMessage(
+                    `Auto-Fix suggested for "${error.message}". ` +
+                    `Review the fix in the output channel before applying manually.`,
+                    'View Fix'
+                ).then(action => {
+                    if (action === 'View Fix') {
+                        // Could open a diff view or show in output channel
+                        console.log('Full suggested fix:', fix.fixedCode);
+                    }
+                });
 
-                edit.replace(document.uri, fullRange, fix.fixedCode);
-                await vscode.workspace.applyEdit(edit);
-                await document.save();
-
-                vscode.window.showInformationMessage(`Auto-Fix: Applied fix for "${error.message}"`);
-
-                // Commit the change
-                await this.gitService.commit(`Auto-Fix: ${error.message}`, [document.fileName]);
+                // DO NOT auto-apply fixes that overwrite entire files
+                // This is a safety measure to prevent code loss
             }
         } catch (err) {
             console.error('Auto-Fix failed:', err);
@@ -235,17 +248,31 @@ export class AutonomousAgent {
             const testFilePath = filePath.replace(/\.ts$/, '.test.ts');
             const testUri = vscode.Uri.file(testFilePath);
 
-            // Check if exists
+            // SAFETY: Check if test file exists - don't overwrite user's tests
+            let fileExists = false;
             try {
                 await vscode.workspace.fs.stat(testUri);
-                // If exists, maybe append or replace? For now, let's skip or overwrite.
-                // Let's overwrite for "Thin Path"
+                fileExists = true;
             } catch {
-                // Doesn't exist, good.
+                // File doesn't exist, safe to create
             }
 
+            if (fileExists) {
+                // Don't overwrite existing test files - user might have written them
+                vscode.window.showWarningMessage(
+                    `Test file already exists: ${testFilePath}. Skipping to preserve your tests.`,
+                    'View File'
+                ).then(action => {
+                    if (action === 'View File') {
+                        vscode.window.showTextDocument(testUri);
+                    }
+                });
+                return; // Skip test generation if file exists
+            }
+
+            // Only create if file doesn't exist
             const edit = new vscode.WorkspaceEdit();
-            edit.createFile(testUri, { overwrite: true });
+            edit.createFile(testUri, { overwrite: false }); // Never overwrite
             edit.insert(testUri, new vscode.Position(0, 0), testCode);
             
             await vscode.workspace.applyEdit(edit);
@@ -291,22 +318,18 @@ export class AutonomousAgent {
                 return;
             }
 
-            // Try to create and switch to the branch
-            // If branch exists, this will fail, so we handle it
-            try {
+            // Check if branch already exists
+            const branches = await this.gitService.getBranches();
+            const branchExists = branches.includes(branchName);
+
+            if (branchExists) {
+                // Branch exists, just switch to it
+                console.log(`[AutonomousAgent] Branch ${branchName} already exists, switching to it...`);
+                await this.gitService.checkoutBranch(branchName);
+            } else {
+                // Branch doesn't exist, create it
                 await this.gitService.createBranch(branchName);
                 console.log(`[AutonomousAgent] Created and switched to ${branchName} branch`);
-            } catch (error: any) {
-                // Branch might already exist, try to switch to it
-                if (error.message && error.message.includes('already exists')) {
-                    // Use git checkout to switch to existing branch
-                    // Note: GitService doesn't have checkout, so we'll handle it gracefully
-                    console.log(`[AutonomousAgent] Branch ${branchName} already exists, attempting to switch...`);
-                    // For now, we'll just log - the branch management is simplified
-                    // In production, you might want to add a checkout method to GitService
-                } else {
-                    throw error;
-                }
             }
         } catch (error) {
             console.error(`[AutonomousAgent] Failed to ensure idle branch:`, error);

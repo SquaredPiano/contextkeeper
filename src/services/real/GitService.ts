@@ -60,4 +60,66 @@ export class GitService implements IGitService {
             return [];
         }
     }
+
+    async getBranches(): Promise<string[]> {
+        try {
+            const branches = await this.git.branchLocal();
+            return branches.all.filter(b => b !== '*').map(b => b.trim());
+        } catch (error) {
+            console.warn('Failed to get branches:', error);
+            return [];
+        }
+    }
+
+    async checkoutBranch(branchName: string): Promise<void> {
+        try {
+            await this.git.checkout(branchName);
+            console.log(`Checked out branch: ${branchName}`);
+        } catch (error: any) {
+            console.error(`Failed to checkout branch ${branchName}:`, error);
+            throw error;
+        }
+    }
+
+    async deleteBranch(branchName: string, force: boolean = false): Promise<void> {
+        try {
+            console.log(`[GitService] Deleting branch: ${branchName} (force: ${force})`);
+            if (force) {
+                await this.git.branch(['-D', branchName]);
+            } else {
+                await this.git.branch(['-d', branchName]);
+            }
+            console.log(`[GitService] Successfully deleted branch: ${branchName}`);
+        } catch (error: any) {
+            console.error(`[GitService] Failed to delete branch ${branchName}:`, error);
+            // Provide more helpful error message
+            const errorMsg = error?.message || String(error);
+            if (errorMsg.includes('not found') || errorMsg.includes('does not exist')) {
+                throw new Error(`Branch "${branchName}" does not exist`);
+            } else if (errorMsg.includes('not fully merged')) {
+                throw new Error(`Branch "${branchName}" is not fully merged. Use force delete if you want to delete it anyway.`);
+            }
+            throw error;
+        }
+    }
+
+    async mergeBranch(branchName: string): Promise<void> {
+        try {
+            console.log(`[GitService] Merging branch: ${branchName} into current branch`);
+            await this.git.merge([branchName, '--no-edit']); // Use --no-edit to avoid opening editor
+            console.log(`[GitService] Successfully merged branch: ${branchName}`);
+        } catch (error: any) {
+            console.error(`[GitService] Failed to merge branch ${branchName}:`, error);
+            // Provide more helpful error message
+            const errorMsg = error?.message || String(error);
+            if (errorMsg.includes('not found') || errorMsg.includes('does not exist')) {
+                throw new Error(`Branch "${branchName}" does not exist`);
+            } else if (errorMsg.includes('conflict') || errorMsg.includes('CONFLICT')) {
+                throw new Error(`Merge conflict detected. Please resolve conflicts manually.`);
+            } else if (errorMsg.includes('already up to date')) {
+                throw new Error(`Branch "${branchName}" is already up to date with current branch`);
+            }
+            throw error;
+        }
+    }
 }

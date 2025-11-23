@@ -98,4 +98,46 @@ export class GitService implements IGitService {
     // For now, we'll leave it as a placeholder or implement basic apply
     throw new Error("Method not implemented.");
   }
+
+  public async getBranches(): Promise<string[]> {
+    try {
+      const { stdout } = await execPromise('git branch', { cwd: this.repoPath });
+      return stdout
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line && !line.startsWith('*'))
+        .map(line => line.replace(/^\*\s*/, '').trim());
+    } catch (error) {
+      console.warn('Failed to get branches:', error);
+      return [];
+    }
+  }
+
+  public async checkoutBranch(branchName: string): Promise<void> {
+    try {
+      await execPromise(`git checkout ${branchName}`, { cwd: this.repoPath });
+    } catch (error: any) {
+      console.error(`Failed to checkout branch ${branchName}:`, error);
+      throw error;
+    }
+  }
+
+  public async deleteBranch(branchName: string, force: boolean = false): Promise<void> {
+    try {
+      const flag = force ? '-D' : '-d';
+      await execPromise(`git branch ${flag} ${branchName}`, { cwd: this.repoPath });
+    } catch (error: any) {
+      console.error(`Failed to delete branch ${branchName}:`, error);
+      throw error;
+    }
+  }
+
+  public async mergeBranch(branchName: string): Promise<void> {
+    try {
+      await execPromise(`git merge ${branchName}`, { cwd: this.repoPath });
+    } catch (error: any) {
+      console.error(`Failed to merge branch ${branchName}:`, error);
+      throw error;
+    }
+  }
 }
