@@ -736,7 +736,7 @@ async function refreshCopilotBranches(): Promise<void> {
       })
     );
 
-    // Sort by date, newest first
+    // sort by date, newest first
     branchInfo.sort((a, b) => b.lastCommitDate.getTime() - a.lastCommitDate.getTime());
 
     sidebarProvider.postMessage({ type: 'copilotBranches', payload: branchInfo });
