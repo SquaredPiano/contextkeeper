@@ -71,7 +71,7 @@ export class IdleService implements IIdleService {
 
     // Store references to orchestrator and autonomous agent
     private orchestrator: Orchestrator | null = null;
-    private autonomousAgent: AutonomousAgent | null = null;
+    public autonomousAgent: AutonomousAgent | null = null; // Made public for linting access
 
     /**
      * Set the orchestrator and autonomous agent for idle improvements workflow
@@ -152,44 +152,206 @@ export class IdleService implements IIdleService {
             await autonomousAgent.ensureIdleBranch();
             console.log('[IdleService] ✓ Branch created');
 
-            // Step 2: Request Orchestrator to collect and analyze context
+            // Step 2: LINT FIRST - Run linting on active file and generate linted code file
+            // This should happen BEFORE test generation so tests are generated for clean code
+            console.log('[IdleService] ========== Step 2: Starting lint analysis (PRIORITY) ==========');
+            
+            try {
+                const activeEditor = vscode.window.activeTextEditor;
+                console.log(`[IdleService] Active editor check: ${activeEditor ? 'FOUND' : 'NOT FOUND'}`);
+                
+                if (activeEditor) {
+                    const fileName = activeEditor.document.fileName;
+                    console.log(`[IdleService] Running lint analysis on active file: ${fileName}`);
+                    
+                    try {
+                        // Get the code content
+                        const code = activeEditor.document.getText();
+                        const language = activeEditor.document.languageId;
+                        console.log(`[IdleService] File: ${fileName}, Language: ${language}, Size: ${code.length} chars`);
+                        
+                        // Get VS Code diagnostics for active file
+                        const diagnostics = vscode.languages.getDiagnostics(activeEditor.document.uri);
+                        console.log(`[IdleService] Retrieved ${diagnostics.length} total diagnostics from VS Code`);
+                        
+                        // Use Cloudflare linting service to get issues
+                        let cloudflareIssues: Array<{ message: string; line?: number; severity?: string }> = [];
+                        
+                        if (this.autonomousAgent) {
+                            console.log('[IdleService] Calling Cloudflare linting service...');
+                            try {
+                                // Access cloudflareService from AutonomousAgent
+                                const cloudflareService = (this.autonomousAgent as any).cloudflareService;
+                                if (cloudflareService && typeof cloudflareService.lintCode === 'function') {
+                                    const issues = await cloudflareService.lintCode(code, language);
+                                    cloudflareIssues = issues.map((i: { message: string; line: number; severity: string }) => ({
+                                        message: i.message,
+                                        line: i.line,
+                                        severity: i.severity
+                                    }));
+                                    console.log(`[IdleService] Cloudflare found ${cloudflareIssues.length} lint issues`);
+                                } else {
+                                    console.warn('[IdleService] CloudflareService not available on AutonomousAgent');
+                                }
+                            } catch (cfError) {
+                                console.warn('[IdleService] Cloudflare linting failed:', cfError);
+                            }
+                        }
+                        
+                        // Convert VS Code diagnostics to simple format
+                        const vscodeIssues = diagnostics.map(d => ({
+                            message: d.message,
+                            line: d.range.start.line + 1,
+                            severity: d.severity === vscode.DiagnosticSeverity.Error ? 'error' : 'warning'
+                        }));
+                        
+                        const allIssues = [...cloudflareIssues, ...vscodeIssues];
+                        console.log(`[IdleService] Total issues found: ${allIssues.length} (${cloudflareIssues.length} from Cloudflare, ${vscodeIssues.length} from VS Code)`);
+                        
+                        // Always use AI to improve code, even if no lint issues found
+                        // AI can find code quality improvements, style issues, optimizations, etc.
+                        if (allIssues.length > 0) {
+                            console.log('[IdleService] Generating linted code with AI (fixing issues)...');
+                        } else {
+                            console.log('[IdleService] No lint issues found, but using AI to improve code quality...');
+                            // Create a generic "improvement" issue to trigger AI analysis
+                            allIssues.push({
+                                message: 'Review code for improvements: style, performance, best practices',
+                                line: 1,
+                                severity: 'info'
+                            });
+                        }
+                        
+                        // Generate linted/improved code using AI
+                        const lintedCode = await this.generateLintedCode(code, language, allIssues);
+                        
+                        if (lintedCode && lintedCode !== code) {
+                            // Create a new file with .linted extension
+                            await this.createLintedFile(activeEditor.document.uri, lintedCode);
+                            console.log('[IdleService] ✓ Created linted/improved code file');
+                        } else {
+                            console.log('[IdleService] AI returned no changes - code is already optimal');
+                        }
+                    } catch (lintError) {
+                        console.error('[IdleService] Lint analysis failed:', lintError);
+                        const errorMsg = lintError instanceof Error ? lintError.message : String(lintError);
+                        console.error('[IdleService] Error details:', errorMsg);
+                        // Continue anyway - don't fail the whole workflow
+                    }
+                } else {
+                    console.log('[IdleService] No active editor - skipping lint analysis');
+                }
+            } catch (step2Error) {
+                console.error('[IdleService] Step 2 (linting) failed completely:', step2Error);
+                const errorMsg = step2Error instanceof Error ? step2Error.message : String(step2Error);
+                console.error('[IdleService] Step 2 error details:', errorMsg);
+            }
+            
+            console.log('[IdleService] ========== Step 2: Completed lint analysis ==========');
+
+            // Step 3: Request Orchestrator to collect and analyze context
             const result = await orchestrator.analyzeForIdleImprovements();
             console.log('[IdleService] ✓ Context analyzed');
 
-            // Step 3: Request Autonomous to store session/test artifacts in LanceDB and track AI edits
+            // Step 4: Request Autonomous to store session/test artifacts in LanceDB and track AI edits
             // This also EXECUTES the generated tests
             if (result) {
+                console.log('[IdleService] Step 4: Storing results and generating tests...');
+                try {
                 await autonomousAgent.storeIdleResults(result, this.storage, orchestrator);
                 console.log('[IdleService] ✓ Tests generated and executed');
+                } catch (step4Error) {
+                    console.error('[IdleService] Step 4 failed:', step4Error);
+                    // Continue to Step 5 even if Step 4 fails
+                }
+            } else {
+                console.log('[IdleService] Step 4: No result to store, skipping');
             }
-
-            // Step 4: Run linting on active file and create CodeAction fix suggestions
+            
+            try {
             const activeEditor = vscode.window.activeTextEditor;
+                console.log(`[IdleService] Active editor check: ${activeEditor ? 'FOUND' : 'NOT FOUND'}`);
+                
             if (activeEditor) {
-                console.log('[IdleService] Running lint analysis on active file...');
+                const fileName = activeEditor.document.fileName;
+                console.log(`[IdleService] Running lint analysis on active file: ${fileName}`);
+                
                 try {
+                    // Get the code content
+                    const code = activeEditor.document.getText();
+                    const language = activeEditor.document.languageId;
+                    console.log(`[IdleService] File: ${fileName}, Language: ${language}, Size: ${code.length} chars`);
+                    
                     // Get VS Code diagnostics for active file
                     const diagnostics = vscode.languages.getDiagnostics(activeEditor.document.uri);
-                    if (diagnostics.length > 0) {
-                        console.log(`[IdleService] Found ${diagnostics.length} lint issues`);
+                    console.log(`[IdleService] Retrieved ${diagnostics.length} total diagnostics from VS Code`);
+                    
+                    // Use Cloudflare linting service to get issues
+                    let cloudflareIssues: Array<{ message: string; line?: number; severity?: string }> = [];
+                    
+                    if (this.autonomousAgent) {
+                        console.log('[IdleService] Calling Cloudflare linting service...');
+                        try {
+                            // Access cloudflareService from AutonomousAgent
+                            const cloudflareService = (this.autonomousAgent as any).cloudflareService;
+                            if (cloudflareService && typeof cloudflareService.lintCode === 'function') {
+                                const issues = await cloudflareService.lintCode(code, language);
+                                cloudflareIssues = issues.map((i: { message: string; line: number; severity: string }) => ({
+                                    message: i.message,
+                                    line: i.line,
+                                    severity: i.severity
+                                }));
+                                console.log(`[IdleService] Cloudflare found ${cloudflareIssues.length} lint issues`);
+                            } else {
+                                console.warn('[IdleService] CloudflareService not available on AutonomousAgent');
+                            }
+                        } catch (cfError) {
+                            console.warn('[IdleService] Cloudflare linting failed:', cfError);
+                        }
+                    }
+                    
+                    // Convert VS Code diagnostics to simple format
+                    const vscodeIssues = diagnostics.map(d => ({
+                        message: d.message,
+                        line: d.range.start.line + 1,
+                        severity: d.severity === vscode.DiagnosticSeverity.Error ? 'error' : 'warning'
+                    }));
+                    
+                    const allIssues = [...cloudflareIssues, ...vscodeIssues];
+                    console.log(`[IdleService] Total issues found: ${allIssues.length} (${cloudflareIssues.length} from Cloudflare, ${vscodeIssues.length} from VS Code)`);
+                    
+                    if (allIssues.length > 0) {
+                        // Generate linted code using AI
+                        console.log('[IdleService] Generating linted code with AI...');
+                        const lintedCode = await this.generateLintedCode(code, language, allIssues);
                         
-                        // Request autonomous agent to create lint fix suggestions
-                        // This will use the CodeActionProvider to show Keep/Undo UI
-                        await autonomousAgent.createLintFixSuggestions(
-                            activeEditor.document.uri,
-                            diagnostics
-                        );
-                        console.log('[IdleService] ✓ Lint fixes created');
+                        if (lintedCode && lintedCode !== code) {
+                            // Create a new file with .linted extension
+                            await this.createLintedFile(activeEditor.document.uri, lintedCode);
+                            console.log('[IdleService] ✓ Created linted code file');
+                        } else {
+                            console.log('[IdleService] No changes needed - code is already clean or AI returned no changes');
+                        }
                     } else {
-                        console.log('[IdleService] No lint issues found in active file');
+                        console.log('[IdleService] No lint issues found - code is clean');
                     }
                 } catch (lintError) {
-                    console.warn('[IdleService] Lint fix creation failed:', lintError);
+                    console.error('[IdleService] Lint analysis failed:', lintError);
+                    const errorMsg = lintError instanceof Error ? lintError.message : String(lintError);
+                    console.error('[IdleService] Error details:', errorMsg);
                     // Continue anyway - don't fail the whole workflow
                 }
+                } else {
+                    console.log('[IdleService] No active editor - skipping lint analysis');
+                }
+            } catch (step4Error) {
+                console.error('[IdleService] Step 4 failed completely:', step4Error);
+                const errorMsg = step4Error instanceof Error ? step4Error.message : String(step4Error);
+                console.error('[IdleService] Step 4 error details:', errorMsg);
             }
-
+            
             // Step 5: Display results to user
+            console.log('[IdleService] Step 5: Displaying results...');
             if (result) {
                 this.displayIdleResults(result);
                 
@@ -198,7 +360,8 @@ export class IdleService implements IIdleService {
                     this.uiUpdateCallback(result);
                 }
             }
-
+            
+            console.log('[IdleService] ========== Idle improvements workflow COMPLETE ==========');
             return result || null;
 
         } catch (error) {
@@ -330,5 +493,76 @@ export class IdleService implements IIdleService {
         const more = uniqueFiles.size > 3 ? ` and ${uniqueFiles.size - 3} others` : '';
         
         return `Worked on ${filesList}${more}. Made ${editCount} edits.`;
+    }
+
+    /**
+     * Generate linted code using AI service
+     */
+    private async generateLintedCode(
+        code: string,
+        language: string,
+        issues: Array<{ message: string; line?: number; severity?: string }>
+    ): Promise<string | null> {
+        if (!this.aiService) {
+            console.warn('[IdleService] AI service not available for linting');
+            return null;
+        }
+
+        try {
+            const issuesText = issues.slice(0, 10).map((issue: { message: string; line?: number; severity?: string }, i: number) => 
+                `  ${i + 1}. Line ${issue.line || '?'}: ${issue.message}`
+            ).join('\n');
+
+            const prompt = `Fix the following ${language} code by addressing these lint issues:\n\n${issuesText}\n\nOriginal code:\n\`\`\`${language}\n${code}\n\`\`\`\n\nReturn ONLY the fixed code, no explanations.`;
+
+            // Use AI to fix the code
+            const fixedCode = await this.aiService.fixError(code, `Fix ${issues.length} lint issues: ${issues.slice(0, 3).map(i => i.message).join(', ')}`);
+            
+            if (fixedCode && fixedCode.fixedCode) {
+                return fixedCode.fixedCode;
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('[IdleService] Failed to generate linted code:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Create a new file with linted code
+     */
+    private async createLintedFile(originalUri: vscode.Uri, lintedCode: string): Promise<void> {
+        try {
+            // Create new file path with .linted extension
+            const originalPath = originalUri.fsPath;
+            const pathParts = originalPath.split('.');
+            const extension = pathParts.pop();
+            const basePath = pathParts.join('.');
+            const lintedPath = `${basePath}.linted.${extension}`;
+            const lintedUri = vscode.Uri.file(lintedPath);
+
+            // Create the file with linted code
+            const edit = new vscode.WorkspaceEdit();
+            edit.createFile(lintedUri, { ignoreIfExists: true });
+            edit.insert(lintedUri, new vscode.Position(0, 0), lintedCode);
+
+            const applied = await vscode.workspace.applyEdit(edit);
+            if (applied) {
+                // Show notification
+                vscode.window.showInformationMessage(
+                    `✅ Linted code saved to ${vscode.workspace.asRelativePath(lintedUri)}`,
+                    'Open File'
+                ).then(choice => {
+                    if (choice === 'Open File') {
+                        vscode.window.showTextDocument(lintedUri);
+                    }
+                });
+            } else {
+                console.error('[IdleService] Failed to create linted file');
+            }
+        } catch (error) {
+            console.error('[IdleService] Error creating linted file:', error);
+        }
     }
 }

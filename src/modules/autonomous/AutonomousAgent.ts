@@ -6,6 +6,8 @@ import type { AICodeActionProvider } from '../../services/AICodeActionProvider';
 import type { TestFileGenerator } from '../../utils/testFileGenerator';
 import type { SurgicalLintFixer } from '../../services/SurgicalLintFixer';
 import { TestRunner } from '../../services/TestRunner';
+import { ReversiblePatchManager } from '../../utils/ReversiblePatch';
+import { TestGenerator } from '../../utils/TestGenerator';
 
 export class AutonomousAgent {
     private isRunning: boolean = false;
@@ -15,6 +17,8 @@ export class AutonomousAgent {
     private testFileGenerator: TestFileGenerator | null = null;
     private surgicalLintFixer: SurgicalLintFixer | null = null;
     private testRunner: TestRunner;
+    private patchManager: ReversiblePatchManager;
+    private testGenerator: TestGenerator;
 
     constructor(
         private gitService: IGitService,
@@ -24,6 +28,8 @@ export class AutonomousAgent {
         this.taskRegistry = new TaskRegistry();
         this.cloudflareService = new CloudflareService();
         this.testRunner = new TestRunner();
+        this.patchManager = ReversiblePatchManager.getInstance();
+        this.testGenerator = new TestGenerator(this.aiService); // Pass AI service for test generation
         this.registerDefaultTasks();
     }
 
@@ -280,61 +286,57 @@ export class AutonomousAgent {
         const editor = vscode.window.activeTextEditor;
         if (!editor) { return; }
 
-        const code = editor.document.getText();
-        const filePath = editor.document.fileName;
-        const languageId = editor.document.languageId; // Get VS Code language ID
-        
-        // Map VS Code language IDs to our language names
-        const languageMap: Record<string, string> = {
-            'typescript': 'typescript',
-            'javascript': 'javascript',
-            'python': 'python',
-            'java': 'java',
-            'go': 'go',
-            'rust': 'rust',
-            'cpp': 'cpp',
-            'c': 'c',
-            'csharp': 'csharp'
-        };
-        
-        const detectedLanguage = languageMap[languageId] || 'typescript';
-        console.log(`[AutonomousAgent] Generating tests for ${detectedLanguage} code`);
+        const document = editor.document;
+        console.log(`[AutonomousAgent] Generating tests for ${document.languageId} code`);
         
         try {
-            // Generate tests in the SAME language as the source file
-            const testCode = await this.aiService.generateTests(code, detectedLanguage);
+            // Use TestGenerator for non-invasive test generation
+            const testFileUri = await this.testGenerator.generateScopedTests(document);
             
-            // Use TestFileGenerator if available
-            if (this.testFileGenerator) {
-                const uri = await this.testFileGenerator.createTestFile(filePath, testCode, undefined, detectedLanguage);
-                if (uri) {
-                    vscode.window.showInformationMessage(
-                        `✅ Test file created: ${vscode.workspace.asRelativePath(uri)}`,
-                        'Open File'
-                    ).then(selection => {
-                        if (selection === 'Open File') {
-                            vscode.window.showTextDocument(uri);
-                        }
-                    });
+            if (testFileUri) {
+                vscode.window.showInformationMessage(
+                    `✅ Test file created: ${vscode.workspace.asRelativePath(testFileUri)}`,
+                    'Open File'
+                ).then(selection => {
+                    if (selection === 'Open File') {
+                        vscode.window.showTextDocument(testFileUri);
+                    }
+                });
+            } else {
+                // Fallback: Try legacy TestFileGenerator if available
+                if (this.testFileGenerator) {
+                    const code = document.getText();
+                    const filePath = document.fileName;
+                    const languageId = document.languageId;
+                    
+                    const languageMap: Record<string, string> = {
+                        'typescript': 'typescript',
+                        'javascript': 'javascript',
+                        'python': 'python',
+                        'java': 'java',
+                        'go': 'go',
+                        'rust': 'rust',
+                        'cpp': 'cpp',
+                        'c': 'c',
+                        'csharp': 'csharp'
+                    };
+                    
+                    const detectedLanguage = languageMap[languageId] || 'typescript';
+                    const testCode = await this.aiService.generateTests(code, detectedLanguage);
+                    const uri = await this.testFileGenerator.createTestFile(filePath, testCode, undefined, detectedLanguage);
+                    
+                    if (uri) {
+                        vscode.window.showInformationMessage(
+                            `✅ Test file created: ${vscode.workspace.asRelativePath(uri)}`,
+                            'Open File'
+                        ).then(selection => {
+                            if (selection === 'Open File') {
+                                vscode.window.showTextDocument(uri);
+                            }
+                        });
+                    }
                 }
-                return;
             }
-            
-            // Fallback: Show test code in output channel
-            const outputChannel = vscode.window.createOutputChannel('Generated Tests');
-            outputChannel.clear();
-            outputChannel.appendLine(`// Generated ${detectedLanguage} test code:`);
-            outputChannel.appendLine(testCode);
-            outputChannel.show();
-            
-            vscode.window.showInformationMessage(
-                'Test code generated. Review in Output panel.',
-                'Copy to Clipboard'
-            ).then(selection => {
-                if (selection === 'Copy to Clipboard') {
-                    vscode.env.clipboard.writeText(testCode);
-                }
-            });
 
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
@@ -385,60 +387,79 @@ export class AutonomousAgent {
 
     /**
      * Create lint fix suggestions with Keep/Undo UI for VS Code diagnostics
+     * Uses ReversiblePatchManager for undo capability
      */
     async createLintFixSuggestions(
         uri: vscode.Uri,
         diagnostics: vscode.Diagnostic[]
     ): Promise<number> {
-        if (!this.codeActionProvider) {
-            console.warn('[AutonomousAgent] CodeActionProvider not available');
-            return 0;
-        }
-
         let fixCount = 0;
 
         try {
+            console.log(`[AutonomousAgent] Creating lint fixes for ${diagnostics.length} diagnostics`);
             const document = await vscode.workspace.openTextDocument(uri);
 
             for (const diagnostic of diagnostics) {
                 // Only create fixes for errors and warnings (not info/hints)
+                // Note: This should already be filtered by IdleService, but double-check
                 if (diagnostic.severity !== vscode.DiagnosticSeverity.Error && 
                     diagnostic.severity !== vscode.DiagnosticSeverity.Warning) {
+                    console.log(`[AutonomousAgent] Skipping diagnostic with severity: ${diagnostic.severity}`);
                     continue;
                 }
 
                 // Use AI to generate a fix for this diagnostic
                 try {
                     const lineText = document.lineAt(diagnostic.range.start.line).text;
-                    const fix = await this.generateFixForDiagnostic(document, diagnostic, lineText);
+                    console.log(`[AutonomousAgent] Generating fix for: "${diagnostic.message}" at line ${diagnostic.range.start.line + 1}`);
+                    
+                    const fixEdit = await this.generateFixForDiagnostic(document, diagnostic, lineText);
 
-                    if (fix) {
-                        this.codeActionProvider.addSuggestion(
-                            uri,
-                            `Fix: ${diagnostic.message}`,
-                            fix,
-                            `Line ${diagnostic.range.start.line + 1}: ${diagnostic.message}`
-                        );
-                        fixCount++;
+                    if (fixEdit) {
+                        // Get the text edits from the WorkspaceEdit
+                        const edits = fixEdit.get(uri);
+                        if (edits && edits.length > 0) {
+                            // Use the first edit (most fixes have one edit)
+                            const textEdit = edits[0];
+                            
+                            // Get the original text at the edit range (not diagnostic range, as they may differ)
+                            const originalText = document.getText(textEdit.range);
+                            
+                            console.log(`[AutonomousAgent] Applying fix: "${originalText.substring(0, 50)}..." -> "${textEdit.newText.substring(0, 50)}..."`);
+
+                            // Apply fix using ReversiblePatchManager for undo capability
+                            // Use applyFixWithEdit to handle WorkspaceEdit directly
+                            await this.patchManager.applyFixWithEdit(
+                                uri,
+                                fixEdit,
+                                originalText,
+                                textEdit.range
+                            );
+                            fixCount++;
+                            console.log(`[AutonomousAgent] ✓ Fix ${fixCount} applied successfully`);
+                        } else {
+                            console.warn(`[AutonomousAgent] Fix edit has no edits for URI: ${uri.toString()}`);
+                        }
+                    } else {
+                        console.log(`[AutonomousAgent] No fix generated for: "${diagnostic.message}"`);
                     }
                 } catch (error) {
-                    console.warn(`[AutonomousAgent] Failed to generate fix for "${diagnostic.message}":`, error);
+                    console.error(`[AutonomousAgent] Failed to generate/apply fix for "${diagnostic.message}":`, error);
+                    const errorMsg = error instanceof Error ? error.message : String(error);
+                    console.error(`[AutonomousAgent] Error details: ${errorMsg}`);
                 }
             }
 
             if (fixCount > 0) {
-                vscode.window.showInformationMessage(
-                    `💡 ${fixCount} lint fix(es) available. Click the lightbulb to review and apply.`,
-                    'Show Quick Fix'
-                ).then(selection => {
-                    if (selection === 'Show Quick Fix') {
-                        vscode.commands.executeCommand('editor.action.quickFix');
-                    }
-                });
+                console.log(`[AutonomousAgent] ✓ Successfully applied ${fixCount} lint fix(es) with undo capability`);
+            } else {
+                console.log(`[AutonomousAgent] No fixes were applied (${diagnostics.length} diagnostics processed)`);
             }
 
         } catch (error) {
             console.error('[AutonomousAgent] Failed to create lint fix suggestions:', error);
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            console.error(`[AutonomousAgent] Error details: ${errorMsg}`);
         }
 
         return fixCount;
@@ -500,55 +521,92 @@ export class AutonomousAgent {
             const testResults: Array<{path: string, passed: boolean, output: string}> = [];
 
             // 1. Generate actual test files if tests were provided
-            if (result.tests && result.tests.length > 0 && this.testFileGenerator) {
+            // Use TestGenerator for non-invasive test generation with undo capability
+            if (result.tests && result.tests.length > 0) {
                 console.log(`[AutonomousAgent] Generating ${result.tests.length} test files...`);
                 
-                for (const testContent of result.tests) {
+                const activeEditor = vscode.window.activeTextEditor;
+                if (activeEditor) {
                     try {
-                        // Extract file path and content from test result
-                        // Assuming testContent is in format: "// tests/filename.test.ts\n<code>"
-                        const lines = testContent.split('\n');
-                        const firstLine = lines[0];
-                        const pathMatch = firstLine.match(/\/\/\s*(.+\.test\.[jt]s)/);
+                        // Use TestGenerator to create test file with undo capability
+                        const testFileUri = await this.testGenerator.generateScopedTests(
+                            activeEditor.document,
+                            result
+                        );
                         
-                        if (pathMatch) {
-                            const testPath = pathMatch[1];
-                            const testCode = lines.slice(1).join('\n');
-                            
-                            // Use test file generator to create the test file
-                            const testUri = await this.testFileGenerator.createTestFile(
-                                vscode.window.activeTextEditor?.document.uri.fsPath || '',
-                                testCode
-                            );
-                            
+                        if (testFileUri) {
                             aiEditsCreated++; // Count each test file as an AI edit
+                            const testPath = vscode.workspace.asRelativePath(testFileUri);
                             console.log(`[AutonomousAgent] Generated test file: ${testPath}`);
 
                             // EXECUTE the test immediately after creating it
-                            if (testUri) {
-                                try {
-                                    console.log(`[AutonomousAgent] Executing test: ${testUri.fsPath}`);
-                                    const testResult = await this.testRunner.runTests(testUri.fsPath);
-                                    
-                                    testResults.push({
-                                        path: testPath,
-                                        passed: testResult.failed === 0 && testResult.passed > 0,
-                                        output: `${testResult.passed} passed, ${testResult.failed} failed (${testResult.duration}ms)`
-                                    });
+                            try {
+                                console.log(`[AutonomousAgent] Executing test: ${testFileUri.fsPath}`);
+                                const testResult = await this.testRunner.runTests(testFileUri.fsPath);
+                                
+                                testResults.push({
+                                    path: testPath,
+                                    passed: testResult.failed === 0 && testResult.passed > 0,
+                                    output: `${testResult.passed} passed, ${testResult.failed} failed (${testResult.duration}ms)`
+                                });
 
-                                    console.log(`[AutonomousAgent] Test result for ${testPath}:`, testResult);
-                                } catch (testError) {
-                                    console.error(`[AutonomousAgent] Failed to execute test ${testPath}:`, testError);
-                                    testResults.push({
-                                        path: testPath,
-                                        passed: false,
-                                        output: `Execution failed: ${testError}`
-                                    });
-                                }
+                                console.log(`[AutonomousAgent] Test result for ${testPath}:`, testResult);
+                            } catch (testError) {
+                                console.error(`[AutonomousAgent] Failed to execute test ${testPath}:`, testError);
+                                testResults.push({
+                                    path: testPath,
+                                    passed: false,
+                                    output: `Execution failed: ${testError}`
+                                });
                             }
                         }
                     } catch (error) {
                         console.error('[AutonomousAgent] Failed to generate test file:', error);
+                    }
+                } else {
+                    // Fallback: Use legacy testFileGenerator if available
+                    if (this.testFileGenerator) {
+                        for (const testContent of result.tests) {
+                            try {
+                                // Extract file path and content from test result
+                                const lines = testContent.split('\n');
+                                const firstLine = lines[0];
+                                const pathMatch = firstLine.match(/\/\/\s*(.+\.test\.[jt]s)/);
+                                
+                                if (pathMatch) {
+                                    const testPath = pathMatch[1];
+                                    const testCode = lines.slice(1).join('\n');
+                                    
+                                    // Use test file generator to create the test file
+                                    const testUri = await this.testFileGenerator.createTestFile(
+                                        vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '',
+                                        testCode
+                                    );
+                                    
+                                    aiEditsCreated++;
+                                    console.log(`[AutonomousAgent] Generated test file: ${testPath}`);
+
+                                    if (testUri) {
+                                        try {
+                                            const testResult = await this.testRunner.runTests(testUri.fsPath);
+                                            testResults.push({
+                                                path: testPath,
+                                                passed: testResult.failed === 0 && testResult.passed > 0,
+                                                output: `${testResult.passed} passed, ${testResult.failed} failed (${testResult.duration}ms)`
+                                            });
+                                        } catch (testError) {
+                                            testResults.push({
+                                                path: testPath,
+                                                passed: false,
+                                                output: `Execution failed: ${testError}`
+                                            });
+                                        }
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('[AutonomousAgent] Failed to generate test file:', error);
+                            }
+                        }
                     }
                 }
                 

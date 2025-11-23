@@ -96,10 +96,44 @@ export class GeminiService extends EventEmitter implements IAIService {
     }
   }
 
-  async generateTests(code: string): Promise<string> {
+  async generateTests(code: string, language?: string, framework?: string): Promise<string> {
     if (!this.isInitialized || !this.model) { throw new Error("GeminiService not initialized"); }
 
-    const prompt = `Generate unit tests for the following code using Jest:\n\n${code}`;
+    // Determine appropriate test framework based on language
+    let testFramework = framework;
+    if (!testFramework) {
+      // Default frameworks by language
+      const defaultFrameworks: Record<string, string> = {
+        'typescript': 'Jest',
+        'javascript': 'Jest',
+        'python': 'pytest',
+        'java': 'JUnit',
+        'go': 'Go testing',
+        'rust': 'Rust testing',
+        'cpp': 'Catch2',
+        'c': 'Unity or assert.h',
+        'csharp': 'NUnit'
+      };
+      testFramework = defaultFrameworks[language || 'typescript'] || 'Jest';
+    }
+
+    const prompt = `Generate comprehensive unit tests for the following ${language || 'code'} using ${testFramework}.
+
+Code:
+\`\`\`${language || ''}
+${code}
+\`\`\`
+
+Requirements:
+- Include tests for normal cases
+- Include tests for edge cases
+- Include tests for error conditions
+- Use descriptive test names
+- Generate complete, runnable test code
+- For C code, use Unity testing framework or standard assert.h if Unity is not available
+
+Generate only the test code, no explanations:`;
+    
     const result = await this.model.generateContent(prompt);
     return result.response.text();
   }

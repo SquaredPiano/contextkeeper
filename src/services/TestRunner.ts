@@ -20,6 +20,8 @@ export enum TestFramework {
   Vitest = 'vitest',
   Jest = 'jest',
   Mocha = 'mocha',
+  C = 'c',
+  Cpp = 'cpp',
   Unknown = 'unknown'
 }
 
@@ -36,9 +38,24 @@ export class TestRunner {
   }
 
   /**
-   * Detect test framework from package.json
+   * Detect test framework from package.json or file extension
    */
-  async detectFramework(): Promise<TestFramework> {
+  async detectFramework(testFilePath?: string): Promise<TestFramework> {
+    // First, try to detect from file extension if test file path is provided
+    if (testFilePath) {
+      const ext = path.extname(testFilePath).toLowerCase();
+      if (ext === '.c') {
+        this.framework = TestFramework.C;
+        console.log(`[TestRunner] Detected C test file from extension`);
+        return this.framework;
+      } else if (ext === '.cpp' || ext === '.cc' || ext === '.cxx') {
+        this.framework = TestFramework.Cpp;
+        console.log(`[TestRunner] Detected C++ test file from extension`);
+        return this.framework;
+      }
+    }
+
+    // Try to detect from package.json for JS/TS projects
     try {
       const packageJsonPath = path.join(this.workspaceRoot, 'package.json');
       const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf-8'));
@@ -62,7 +79,16 @@ export class TestRunner {
       console.log(`[TestRunner] Detected test framework: ${this.framework}`);
       return this.framework;
     } catch (error) {
-      console.warn('[TestRunner] Failed to detect framework:', error);
+      // If no package.json and no file extension match, return Unknown
+      // This is expected for C/C++ projects
+      if (testFilePath) {
+        const ext = path.extname(testFilePath).toLowerCase();
+        if (ext === '.c' || ext === '.cpp' || ext === '.cc' || ext === '.cxx') {
+          // Already handled above, but just in case
+          return this.framework;
+        }
+      }
+      console.log(`[TestRunner] No package.json found (expected for C/C++ projects)`);
       this.framework = TestFramework.Unknown;
       return TestFramework.Unknown;
     }
@@ -74,10 +100,8 @@ export class TestRunner {
   async runTests(testFilePath: string): Promise<TestRunResult> {
     const startTime = Date.now();
 
-    // Ensure framework is detected
-    if (this.framework === TestFramework.Unknown) {
-      await this.detectFramework();
-    }
+    // Detect framework from test file path first
+    await this.detectFramework(testFilePath);
 
     if (this.framework === TestFramework.Unknown) {
       return {
@@ -86,7 +110,7 @@ export class TestRunner {
         total: 0,
         duration: 0,
         output: '',
-        error: 'No test framework detected. Please install vitest, jest, or mocha.',
+        error: 'No test framework detected. For JS/TS projects, please install vitest, jest, or mocha. For C/C++ projects, ensure gcc/g++ is available.',
         framework: TestFramework.Unknown
       };
     }
@@ -121,6 +145,23 @@ export class TestRunner {
       const output = error.stdout || '';
       const stderr = error.stderr || '';
       const fullOutput = output + stderr;
+
+      // For C/C++ projects, provide better error messages
+      if ((this.framework === TestFramework.C || this.framework === TestFramework.Cpp) && 
+          (error.message?.includes('gcc') || error.message?.includes('g++') || 
+           stderr.includes('gcc') || stderr.includes('g++') || 
+           error.message?.includes('command not found') || stderr.includes('command not found'))) {
+        console.error('[TestRunner] C/C++ compiler not found. Please install gcc (for C) or g++ (for C++)');
+        return {
+          passed: 0,
+          failed: 0,
+          total: 0,
+          duration,
+          output: fullOutput,
+          error: 'C/C++ compiler (gcc/g++) not found. Please install a C compiler to run tests.',
+          framework: this.framework
+        };
+      }
 
       // Even on error, try to parse results (tests may have failed but runner succeeded)
       if (output) {
@@ -158,6 +199,16 @@ export class TestRunner {
       
       case TestFramework.Mocha:
         return `npx mocha "${relativePath}" --reporter spec`;
+      
+      case TestFramework.C:
+        // Compile and run C test file
+        const outputPath = testFilePath.replace(/\.c$/, '.out');
+        return `gcc -o "${outputPath}" "${testFilePath}" && "${outputPath}"`;
+      
+      case TestFramework.Cpp:
+        // Compile and run C++ test file
+        const cppOutputPath = testFilePath.replace(/\.(cpp|cc|cxx)$/, '.out');
+        return `g++ -o "${cppOutputPath}" "${testFilePath}" && "${cppOutputPath}"`;
       
       default:
         throw new Error(`Unknown test framework: ${this.framework}`);
@@ -198,6 +249,29 @@ export class TestRunner {
           result.passed = this.extractNumber(output, /(\d+)\s+passing/i) || 0;
           result.failed = this.extractNumber(output, /(\d+)\s+failing/i) || 0;
           result.total = result.passed + result.failed;
+          break;
+
+        case TestFramework.C:
+        case TestFramework.Cpp:
+          // For C/C++ tests, check if "All tests passed!" appears in output
+          // Count test functions by looking for "test_" prefix in the source
+          if (output.includes('All tests passed!')) {
+            // Try to count test functions from output or assume all passed
+            const testMatches = output.match(/test_\w+/g);
+            result.total = testMatches ? testMatches.length : 1;
+            result.passed = result.total;
+            result.failed = 0;
+          } else if (output.includes('Assertion failed') || output.includes('assertion') || output.includes('Aborted')) {
+            // Test failed - try to extract info
+            result.failed = 1;
+            result.total = 1;
+            result.passed = 0;
+          } else {
+            // If we can't determine, assume success if program ran without error
+            result.passed = output.includes('All tests passed!') ? 1 : 0;
+            result.failed = result.passed === 0 ? 1 : 0;
+            result.total = 1;
+          }
           break;
       }
     } catch (error) {

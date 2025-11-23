@@ -13,9 +13,6 @@ import { AutonomousAgent } from './modules/autonomous/AutonomousAgent';
 import { DashboardProvider } from './ui/DashboardProvider';
 import { IdleService } from './modules/idle-detector/idle-service';
 import { registerTestCommand } from './test/test-autonomous-pipeline';
-import { AICodeActionProvider } from './services/AICodeActionProvider';
-import { TestFileGenerator } from './utils/testFileGenerator';
-import { SurgicalLintFixer } from './services/SurgicalLintFixer';
 
 // Import real services
 import { ContextService } from './services/real/ContextService';
@@ -63,8 +60,6 @@ let lintingService: LintingService;
 let ingestionService: ContextIngestionService;
 let idleService: IdleService;
 let autonomousAgent: AutonomousAgent;
-let codeActionProvider: AICodeActionProvider;
-let orchestrator: import('./modules/orchestrator/orchestrator').Orchestrator | null = null; // Global orchestrator reference for AI edits tracking
 
 // State
 let currentContext: DeveloperContext | null = null;
@@ -219,6 +214,16 @@ export async function activate(context: vscode.ExtensionContext) {
     // Set up service event listeners
     setupServiceListeners();
 
+    // Listen for cursor position changes to update webview
+    context.subscriptions.push(
+      vscode.window.onDidChangeTextEditorSelection(() => {
+        updateCursorInWebview();
+      }),
+      vscode.window.onDidChangeActiveTextEditor(() => {
+        updateCursorInWebview();
+      })
+    );
+
     // Initialize Command Manager
     commandManager = new CommandManager(
       context,
@@ -265,41 +270,14 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.registerWebviewViewProvider(DashboardProvider.viewType, dashboardProvider)
     );
 
-    // 3.5 Register CodeActionProvider (for AI suggestions with accept/reject)
-    codeActionProvider = new AICodeActionProvider();
-    context.subscriptions.push(
-      vscode.languages.registerCodeActionsProvider(
-        { scheme: 'file', pattern: '**/*' },
-        codeActionProvider,
-        {
-          providedCodeActionKinds: [
-            vscode.CodeActionKind.QuickFix,
-            vscode.CodeActionKind.RefactorRewrite
-          ]
-        }
-      )
-    );
-    console.log('[Extension] Registered CodeActionProvider for AI suggestions');
-
-    // 3.6 Create TestFileGenerator
-    const testFileGenerator = new TestFileGenerator();
-    console.log('[Extension] TestFileGenerator created');
-
-    // 3.7 Create SurgicalLintFixer
-    const surgicalLintFixer = new SurgicalLintFixer(codeActionProvider);
-    console.log('[Extension] SurgicalLintFixer created');
-
     // 4. Initialize Autonomous Agent
     autonomousAgent = new AutonomousAgent(gitService, geminiService, contextService);
-    
-    // Wire up services for safe operations
-    autonomousAgent.setCodeActionProvider(codeActionProvider);
-    autonomousAgent.setTestFileGenerator(testFileGenerator);
-    autonomousAgent.setSurgicalLintFixer(surgicalLintFixer);
-    console.log('[Extension] AutonomousAgent initialized with safe operation services');
 
     // 5. Initialize Orchestrator for idle improvements
-    const cloudflareWorkerUrl = config.get<string>('cloudflare.workerUrl') || process.env.CLOUDFLARE_WORKER_URL || '';
+    // Use same default as CloudflareService if not configured
+    const cloudflareWorkerUrl = config.get<string>('cloudflare.workerUrl') || 
+                                process.env.CLOUDFLARE_WORKER_URL || 
+                                'https://contextkeeper-lint-worker.vishnu.workers.dev';
     const orchestratorConfig = {
       cloudflareWorkerUrl,
       geminiApiKey: geminiApiKey || '',
@@ -307,85 +285,81 @@ export async function activate(context: vscode.ExtensionContext) {
       maxFilesToAnalyze: 10
     };
     
-    // Only initialize Orchestrator if we have required config
-    if (cloudflareWorkerUrl && geminiApiKey) {
+    // Only initialize Orchestrator if we have required config (geminiApiKey is required)
+    let orchestrator: any = null;
+    if (geminiApiKey) {
       try {
-        const orchestratorModule = await import('./modules/orchestrator/orchestrator.js');
+        // @ts-ignore - Dynamic import handled by webpack
+        const orchestratorModule = await import('./modules/orchestrator/orchestrator');
         const { Orchestrator } = orchestratorModule;
         orchestrator = new Orchestrator(orchestratorConfig);
         await orchestrator.initialize();
-        console.log('Orchestrator initialized for idle improvements');
+        console.log(`Orchestrator initialized for idle improvements (worker: ${cloudflareWorkerUrl})`);
       } catch (error) {
         console.warn('Failed to initialize Orchestrator:', error);
         orchestrator = null;
       }
     } else {
-      console.warn('Orchestrator not initialized: missing cloudflare.workerUrl or gemini.apiKey');
+      console.warn('Orchestrator not initialized: missing gemini.apiKey (cloudflare worker URL has default fallback)');
     }
 
     // 6. Initialize Idle Detection Service
-    const autonomousEnabled = config.get<boolean>('autonomous.enabled', true);
+    // SAFETY: Check if autonomous mode is enabled before starting
+    const autonomousEnabled = config.get<boolean>('autonomous.enabled', false);
     
-    idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService, voiceService); // 15 seconds threshold
+    idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService); // 15 seconds threshold
     
-    // Wire up autonomous features if enabled
-    if (autonomousEnabled) {
-      // If we have orchestrator, use the full workflow
-      if (orchestrator && autonomousAgent) {
-        console.log('[Extension] Wiring up full autonomous workflow with orchestrator');
-        idleService.setWorkflowServices(orchestrator, autonomousAgent);
+    // Only wire up autonomous features if explicitly enabled
+    if (autonomousEnabled && orchestrator && autonomousAgent) {
+      idleService.setWorkflowServices(orchestrator, autonomousAgent);
+      
+      // NEW: Wire up UI callback to display idle improvements
+      idleService.onIdleImprovementsComplete((result) => {
+        console.log('[Extension] Idle improvements complete, updating UI...');
         
-        // Wire up UI callback to display idle improvements
-        idleService.onIdleImprovementsComplete((result) => {
-          console.log('[Extension] Idle improvements complete, updating UI...');
+        // Send result to sidebar webview
+        try {
+          const message: ExtensionToUIMessage = {
+            type: 'idleImprovementsComplete',
+            payload: {
+              summary: result.summary,
+              testsGenerated: result.tests.length,
+              recommendations: result.recommendations,
+              timestamp: Date.now()
+            }
+          };
           
-          // Send result to sidebar webview
-          try {
-            const message: ExtensionToUIMessage = {
-              type: 'idleImprovementsComplete',
-              payload: {
-                summary: result.summary,
-                testsGenerated: result.tests.length,
-                recommendations: result.recommendations,
-                timestamp: Date.now()
-              }
-            };
-            
-            sidebarProvider.postMessage(message);
-            recordChange(`Idle analysis: ${result.summary}`, 'idle-improvements', 'autonomous');
-            
-            if (result.tests.length > 0) {
-              recordChange(`Generated ${result.tests.length} test file(s)`, 'test-generation', 'autonomous');
-            }
-            
-            result.recommendations.slice(0, 5).forEach(rec => {
-              recordChange(`[${rec.priority.toUpperCase()}] ${rec.message}`, 'recommendation', 'autonomous');
-            });
-          } catch (error) {
-            console.error('[Extension] Failed to send idle improvements to UI:', error);
+          sidebarProvider.postMessage(message);
+          recordChange(`Idle analysis: ${result.summary}`, 'idle-improvements', 'autonomous');
+          
+          if (result.tests.length > 0) {
+            recordChange(`Generated ${result.tests.length} test file(s)`, 'test-generation', 'autonomous');
           }
-        });
-      } else {
-        // Fallback: Basic idle notification without full orchestrator workflow
-        console.log('[Extension] Orchestrator not available, using basic idle workflow');
-        idleService.onIdle(async () => {
-          console.log('[Extension] Idle detected - running basic analysis');
-          try {
-            // Get current context and run analysis
-            await refreshContext();
-            const editor = vscode.window.activeTextEditor;
-            if (editor && currentContext) {
-              const code = editor.document.getText();
-              const analysis = await aiService.analyze(code, currentContext);
-              recordChange(`Idle analysis: Found ${analysis.issues.length} issues`, 'idle-analysis', 'autonomous');
-            }
-          } catch (error) {
-            console.error('[Extension] Idle analysis failed:', error);
+          
+          result.recommendations.slice(0, 5).forEach(rec => {
+            recordChange(`[${rec.priority.toUpperCase()}] ${rec.message}`, 'recommendation', 'autonomous');
+          });
+        } catch (error) {
+          console.error('[Extension] Failed to send idle improvements to UI:', error);
+        }
+      });
+    } else if (autonomousEnabled) {
+      // Fallback to legacy callback if orchestrator not available (only if enabled)
+      idleService.onIdle(async () => {
+        console.log('ContextKeeper: Idle detected, triggering legacy autonomous work...');
+        try {
+          await autonomousAgent.startSession('auto-lint');
+          
+          if (voiceService && voiceService.isEnabled()) {
+            voiceService.speak("I've completed autonomous work while you were away.", 'casual');
           }
-        });
-      }
+        } catch (error) {
+          console.error('Autonomous task failed:', error);
+          vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? (error instanceof Error ? error.message : String(error)) : 'Unknown error'}`);
+        }
+      });
     } else {
-      console.log('[Extension] Autonomous mode disabled by user');
+      console.log('[Extension] Autonomous mode is disabled. Set copilot.autonomous.enabled to true to enable.');
     }
     
     await idleService.initialize();
@@ -393,6 +367,53 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // Register Test Command
     registerTestCommand(context);
+
+    // Register Reversible Patch Test Command
+    context.subscriptions.push(
+      vscode.commands.registerCommand('copilot.testReversiblePatch', async () => {
+        try {
+          // Use runtime path resolution to avoid webpack bundling
+          // Construct path at runtime so webpack doesn't try to bundle it
+          const testFilePath = path.join(context.extensionPath, 'out', 'test', 'test-reversible-patch.js');
+          
+          // Check if compiled test file exists
+          if (!fs.existsSync(testFilePath)) {
+            // Try alternative path (if compiled differently)
+            const altPath = path.join(context.extensionPath, 'src', 'test', 'test-reversible-patch.js');
+            if (fs.existsSync(altPath)) {
+              delete require.cache[altPath];
+              const testModule = require(altPath);
+              if (testModule && testModule.runReversiblePatchTests) {
+                await testModule.runReversiblePatchTests();
+                return;
+              }
+            }
+            
+            vscode.window.showWarningMessage(
+              'Test file not found. The test file needs to be compiled. ' +
+              'Make sure test-reversible-patch.ts is in the out/test directory.',
+              'OK'
+            );
+            console.error('[Extension] Test file not found at:', testFilePath);
+            return;
+          }
+          
+          // Clear require cache and load the test module
+          delete require.cache[testFilePath];
+          const testModule = require(testFilePath);
+          
+          if (testModule && testModule.runReversiblePatchTests) {
+            await testModule.runReversiblePatchTests();
+          } else {
+            vscode.window.showErrorMessage('Test function not found in test-reversible-patch module');
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          vscode.window.showErrorMessage(`Failed to load test: ${errorMsg}`);
+          console.error('[Extension] Test import error:', error);
+        }
+      })
+    );
 
     // Register Verification Command
     context.subscriptions.push(
@@ -410,6 +431,45 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 /**
+ * Update cursor position in webview when it changes
+ */
+function updateCursorInWebview(): void {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor) {
+    return;
+  }
+
+  const position = editor.selection.active;
+  
+  // Update current context if it exists
+  if (currentContext) {
+    currentContext = {
+      ...currentContext,
+      files: {
+        ...currentContext.files,
+        activeFile: editor.document.fileName,
+      },
+      cursor: {
+        file: editor.document.fileName,
+        line: position.line + 1,
+        column: position.character + 1,
+        currentFunction: currentContext.cursor.currentFunction || '', // Preserve existing function name
+        selectedText: editor.document.getText(editor.selection),
+      },
+    };
+    
+    // Send updated context to webview
+    sidebarProvider.updateContext(currentContext);
+  } else {
+    // If no context exists yet, try to collect it
+    // This handles the case where cursor changes before first context collection
+    refreshContext().catch(() => {
+      // Ignore errors, will be collected later
+    });
+  }
+}
+
+/**
  * Set up event listeners for service events
  */
 function setupServiceListeners() {
@@ -422,13 +482,6 @@ function setupServiceListeners() {
   // Listen to context service events
   contextService.on('contextCollected', (context: DeveloperContext) => {
     currentContext = context;
-    
-    // Augment context with AI edits count if orchestrator is available
-    if (orchestrator && typeof orchestrator.getAIEditsCount === 'function') {
-      // Override totalEdits with AI edits count
-      context.session.totalEdits = orchestrator.getAIEditsCount();
-    }
-    
     sidebarProvider.updateContext(context);
     // Update the status bar with fresh developer context
     try {
@@ -568,16 +621,6 @@ function _registerCommands(context: vscode.ExtensionContext) {
       NotificationManager.showSuccess('Fix application coming soon!');
     })
   );
-
-  // Register dismiss AI suggestion command
-  context.subscriptions.push(
-    vscode.commands.registerCommand('contextkeeper.dismissAISuggestion', (fileKey: string) => {
-      if (codeActionProvider) {
-        codeActionProvider.dismissSuggestion(fileKey);
-        vscode.window.showInformationMessage('AI suggestion dismissed');
-      }
-    })
-  );
 }
 
 /**
@@ -612,8 +655,8 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         await cfg.update('voice.elevenEnabled', message.enabled, true);
-        if (voiceService && 'setEnabled' in voiceService && typeof (voiceService as { setEnabled?: (enabled: boolean) => void }).setEnabled === 'function') {
-          (voiceService as { setEnabled: (enabled: boolean) => void }).setEnabled(message.enabled);
+        if (voiceService && (voiceService as any).setEnabled) {
+          (voiceService as any).setEnabled(message.enabled);
         }
         vscode.window.showInformationMessage(`Sound ${message.enabled ? 'enabled' : 'disabled'}`);
         recordChange(`ElevenLabs voice ${message.enabled ? 'enabled' : 'disabled'}`, 'voice');
@@ -628,8 +671,8 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         await cfg.update('notifications.enabled', message.enabled, true);
-        if ('setEnabled' in NotificationManager && typeof (NotificationManager as { setEnabled?: (enabled: boolean) => void }).setEnabled === 'function') {
-          (NotificationManager as { setEnabled: (enabled: boolean) => void }).setEnabled(message.enabled);
+        if ((NotificationManager as any)?.setEnabled) {
+          (NotificationManager as any).setEnabled(message.enabled);
         }
         vscode.window.showInformationMessage(`Notifications ${message.enabled ? 'enabled' : 'disabled'}`);
         recordChange(`Notifications ${message.enabled ? 'enabled' : 'disabled'}`, 'notifications');
@@ -644,8 +687,8 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         await cfg.update('voice.elevenEnabled', true, true);
-        if (voiceService && 'setEnabled' in voiceService && typeof (voiceService as { setEnabled?: (enabled: boolean) => void }).setEnabled === 'function') {
-          (voiceService as { setEnabled: (enabled: boolean) => void }).setEnabled(true);
+        if (voiceService && (voiceService as any).setEnabled) {
+          (voiceService as any).setEnabled(true);
         }
         sidebarProvider.postMessage({ type: 'elevenVoiceState', enabled: true });
       } catch (error) {

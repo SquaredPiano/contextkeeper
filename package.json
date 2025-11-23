@@ -110,6 +110,12 @@
         "command": "contextkeeper.testPipeline",
         "title": "ContextKeeper: Test Autonomous Pipeline",
         "category": "ContextKeeper"
+      },
+      {
+        "command": "copilot.testReversiblePatch",
+        "title": "Test Reversible Patch System",
+        "category": "Copilot",
+        "icon": "$(debug)"
       }
     ],
     "configuration": {

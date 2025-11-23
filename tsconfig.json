@@ -22,6 +22,7 @@
     "**/*.test.ts",
     "src/modules/elevenlabs/test.ts",
     "tests/**/*",
-    "test-*.ts"
+    "test-*.ts",
+    "src/test/test-reversible-patch.ts"
 	]
 }
