@@ -4,6 +4,7 @@ import * as vscode from "vscode";
 import * as dotenv from "dotenv";
 import * as path from "path";
 import * as fs from "fs";
+import simpleGit from "simple-git";
 
 import { LintingService } from "./modules/gitlogs/LintingService";
 import { ContextIngestionService } from "./services/ingestion/ContextIngestionService";
@@ -38,6 +39,7 @@ import {
   IAIService,
   IGitService,
   IVoiceService,
+  CopilotBranch,
 } from "./services/interfaces";
 
 import { CommandManager } from "./managers/CommandManager";
@@ -72,9 +74,9 @@ function recordChange(description: string, action: string = 'action', actor: str
     if (extensionChanges.length > 200) {
       extensionChanges.pop();
     }
-    // push to webview if available - using safe cast
+    // push to webview if available
     try {
-      (sidebarProvider as SidebarWebviewProvider & { postMessage?: (msg: unknown) => void })?.postMessage?.({ type: 'extensionChanges', payload: extensionChanges });
+      sidebarProvider.postMessage({ type: 'extensionChanges', payload: extensionChanges });
     } catch{}
   } catch{}
 }
@@ -196,14 +198,14 @@ export async function activate(context: vscode.ExtensionContext) {
     // Ensure sound is enabled when the extension starts
     config.update('voice.elevenEnabled', true, true).then(() => {}, () => {});
     // send initial UI state
-    (sidebarProvider as SidebarWebviewProvider & { postMessage?: (msg: unknown) => void }).postMessage?.({ type: 'elevenVoiceState', enabled: true });
+    sidebarProvider.postMessage({ type: 'elevenVoiceState', enabled: true });
     try {
       recordChange('ElevenLabs voice enabled on startup', 'voice');
     } catch {}
     // send initial notifications state
     try {
       const notifEnabled = config.get<boolean>('notifications.enabled', true);
-      (sidebarProvider as SidebarWebviewProvider & { postMessage?: (msg: unknown) => void }).postMessage?.({ type: 'notificationsState', enabled: Boolean(notifEnabled) });
+      sidebarProvider.postMessage({ type: 'notificationsState', enabled: Boolean(notifEnabled) });
     } catch {}
   } catch {
     // ignore if webview not ready
@@ -271,23 +273,30 @@ export async function activate(context: vscode.ExtensionContext) {
     };
     
     // Only initialize Orchestrator if we have required config
-    let orchestrator: InstanceType<typeof import('./modules/orchestrator/orchestrator.js').Orchestrator> | null = null;
+    let orchestrator: any = null;
     if (cloudflareWorkerUrl && geminiApiKey) {
-      const { Orchestrator } = await import('./modules/orchestrator/orchestrator.js');
-      orchestrator = new Orchestrator(orchestratorConfig);
-      if (orchestrator) {
+      try {
+        const orchestratorModule = await import('./modules/orchestrator/orchestrator');
+        const { Orchestrator } = orchestratorModule;
+        orchestrator = new Orchestrator(orchestratorConfig);
         await orchestrator.initialize();
         console.log('Orchestrator initialized for idle improvements');
+      } catch (error) {
+        console.warn('Failed to initialize Orchestrator:', error);
+        orchestrator = null;
       }
     } else {
       console.warn('Orchestrator not initialized: missing cloudflare.workerUrl or gemini.apiKey');
     }
 
     // 6. Initialize Idle Detection Service
+    // SAFETY: Check if autonomous mode is enabled before starting
+    const autonomousEnabled = config.get<boolean>('autonomous.enabled', false);
+    
     idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService); // 15 seconds threshold
     
-    // Wire idle service to orchestrator and autonomous agent
-    if (orchestrator && autonomousAgent) {
+    // Only wire up autonomous features if explicitly enabled
+    if (autonomousEnabled && orchestrator && autonomousAgent) {
       idleService.setWorkflowServices(orchestrator, autonomousAgent);
       
       // NEW: Wire up UI callback to display idle improvements
@@ -526,7 +535,83 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       await runAnalysis();
       break;
 
-    
+    case 'setAutonomyDelay':
+      try {
+        // Update idle service threshold
+        if (idleService) {
+          idleService.updateThreshold(message.seconds * 1000);
+        }
+        // Store in settings for persistence
+        const config = vscode.workspace.getConfiguration('copilot');
+        await config.update('autonomous.idleTimeout', message.seconds, true);
+        console.log(`[Extension] Updated autonomy delay to ${message.seconds}s`);
+      } catch (error) {
+        console.error('Failed to update autonomy delay:', error);
+      }
+      break;
+
+    case 'setElevenVoice':
+      try {
+        const cfg = vscode.workspace.getConfiguration('copilot');
+        await cfg.update('voice.elevenEnabled', message.enabled, true);
+        if (voiceService && (voiceService as any).setEnabled) {
+          (voiceService as any).setEnabled(message.enabled);
+        }
+        vscode.window.showInformationMessage(`Sound ${message.enabled ? 'enabled' : 'disabled'}`);
+        recordChange(`ElevenLabs voice ${message.enabled ? 'enabled' : 'disabled'}`, 'voice');
+        // Send state back to webview
+        sidebarProvider.postMessage({ type: 'elevenVoiceState', enabled: message.enabled });
+      } catch (error) {
+        console.error('Failed to update voice setting:', error);
+      }
+      break;
+
+    case 'setNotifications':
+      try {
+        const cfg = vscode.workspace.getConfiguration('copilot');
+        await cfg.update('notifications.enabled', message.enabled, true);
+        if ((NotificationManager as any)?.setEnabled) {
+          (NotificationManager as any).setEnabled(message.enabled);
+        }
+        vscode.window.showInformationMessage(`Notifications ${message.enabled ? 'enabled' : 'disabled'}`);
+        recordChange(`Notifications ${message.enabled ? 'enabled' : 'disabled'}`, 'notifications');
+        // Send state back to webview
+        sidebarProvider.postMessage({ type: 'notificationsState', enabled: message.enabled });
+      } catch (error) {
+        console.error('Failed to update notifications setting:', error);
+      }
+      break;
+
+    case 'ensureSoundOn':
+      try {
+        const cfg = vscode.workspace.getConfiguration('copilot');
+        await cfg.update('voice.elevenEnabled', true, true);
+        if (voiceService && (voiceService as any).setEnabled) {
+          (voiceService as any).setEnabled(true);
+        }
+        sidebarProvider.postMessage({ type: 'elevenVoiceState', enabled: true });
+      } catch (error) {
+        console.error('Failed to ensure sound on:', error);
+      }
+      break;
+
+    case 'requestCopilotBranches':
+      await refreshCopilotBranches();
+      break;
+
+    case 'checkoutCopilotBranch':
+      await checkoutCopilotBranch(message.branchName);
+      break;
+
+    case 'mergeCopilotBranch':
+      console.log('[Extension] Received mergeCopilotBranch message:', message.branchName);
+      await mergeCopilotBranch(message.branchName);
+      break;
+
+    case 'deleteCopilotBranch':
+      console.log('[Extension] Received deleteCopilotBranch message:', message.branchName);
+      await deleteCopilotBranch(message.branchName);
+      break;
 
     case 'navigateToIssue':
       await vscode.commands.executeCommand(
@@ -543,40 +628,6 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
     case 'dismissIssue':
       // Future: implement issue dismissal
       break;
-  }
-
-  // Handle non-typed UI messages (from webview) like sound toggles
-  const m = message as unknown as { type?: string; enabled?: boolean };
-  if (m && m.type) {
-    if (m.type === 'setElevenVoice') {
-      try {
-        const cfg = vscode.workspace.getConfiguration('copilot');
-        cfg.update('voice.elevenEnabled', Boolean(m.enabled), true).then(() => {}, () => {});
-        vscode.window.showInformationMessage(`Sound ${m.enabled ? 'enabled' : 'disabled'}`);
-        try {
-          recordChange(`ElevenLabs voice ${m.enabled ? 'enabled' : 'disabled'}`, 'voice');
-        } catch {}
-      } catch {}
-    }
-
-    if (m.type === 'setNotifications') {
-      try {
-        const cfg = vscode.workspace.getConfiguration('copilot');
-        cfg.update('notifications.enabled', Boolean(m.enabled), true).then(() => {}, () => {});
-        vscode.window.showInformationMessage(`Notifications ${m.enabled ? 'enabled' : 'disabled'}`);
-        try {
-          recordChange(`Notifications ${m.enabled ? 'enabled' : 'disabled'}`, 'notifications');
-        } catch {}
-      } catch {}
-    }
-
-    if (m.type === 'ensureSoundOn') {
-      try {
-        const cfg = vscode.workspace.getConfiguration('copilot');
-        cfg.update('voice.elevenEnabled', true, true).then(() => {}, () => {});
-        (sidebarProvider as SidebarWebviewProvider & { postMessage?: (msg: unknown) => void }).postMessage?.({ type: 'elevenVoiceState', enabled: true });
-      } catch {}
-    }
   }
 }
 
@@ -638,6 +689,157 @@ async function runAnalysis(): Promise<void> {
       `Analysis failed: ${errorMsg}`,
       () => runAnalysis()
     );
+  }
+}
+
+/**
+ * Refresh copilot branches and send to webview
+ */
+async function refreshCopilotBranches(): Promise<void> {
+  try {
+    if (!gitService) {
+      console.warn('GitService not available');
+      return;
+    }
+
+    const allBranches = await gitService.getBranches();
+    const currentBranch = await gitService.getCurrentBranch();
+    const copilotBranches = allBranches.filter(b => b.startsWith('copilot/'));
+
+    // Get commit info for each branch using git log with branch name
+    const branchInfo: CopilotBranch[] = await Promise.all(
+      copilotBranches.map(async (branchName) => {
+        try {
+          // Use simple-git to get log for specific branch without checking out
+          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+          const git = simpleGit(workspaceRoot);
+          const log = await git.log({ from: branchName, maxCount: 1 });
+          
+          return {
+            name: branchName,
+            lastCommit: log.latest?.message || 'No commits',
+            lastCommitDate: log.latest?.date ? new Date(log.latest.date) : new Date(),
+            commitCount: log.total || 0,
+            isCurrent: branchName === currentBranch
+          };
+        } catch (error) {
+          console.warn(`Failed to get info for branch ${branchName}:`, error);
+          return {
+            name: branchName,
+            lastCommit: 'Unknown',
+            lastCommitDate: new Date(),
+            commitCount: 0,
+            isCurrent: branchName === currentBranch
+          };
+        }
+      })
+    );
+
+    // Sort by date, newest first
+    branchInfo.sort((a, b) => b.lastCommitDate.getTime() - a.lastCommitDate.getTime());
+
+    sidebarProvider.postMessage({ type: 'copilotBranches', payload: branchInfo });
+  } catch (error) {
+    console.error('Failed to refresh copilot branches:', error);
+    NotificationManager.showError(`Failed to load branches: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Checkout a copilot branch
+ */
+async function checkoutCopilotBranch(branchName: string): Promise<void> {
+  try {
+    if (!gitService) {
+      throw new Error('GitService not available');
+    }
+
+    await gitService.checkoutBranch(branchName);
+    NotificationManager.showSuccess(`Switched to branch ${branchName}`);
+    recordChange(`Checked out branch ${branchName}`, 'git');
+    
+    // Refresh branches list to update current branch indicator
+    await refreshCopilotBranches();
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    NotificationManager.showError(`Failed to checkout branch: ${errorMsg}`);
+    console.error('Failed to checkout branch:', error);
+  }
+}
+
+/**
+ * Merge a copilot branch into current branch
+ */
+async function mergeCopilotBranch(branchName: string): Promise<void> {
+  try {
+    if (!gitService) {
+      throw new Error('GitService not available');
+    }
+
+    const currentBranch = await gitService.getCurrentBranch();
+    
+    // Confirm merge
+    const confirm = await vscode.window.showWarningMessage(
+      `Merge branch "${branchName}" into "${currentBranch}"?`,
+      { modal: true },
+      'Merge'
+    );
+
+    if (confirm !== 'Merge') {
+      return;
+    }
+
+    // Merge the branch into current branch
+    await gitService.mergeBranch(branchName);
+    NotificationManager.showSuccess(`Successfully merged ${branchName} into ${currentBranch}`);
+    recordChange(`Merged branch ${branchName} into ${currentBranch}`, 'git');
+    
+    // Refresh branches list
+    await refreshCopilotBranches();
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    NotificationManager.showError(`Failed to merge branch: ${errorMsg}`);
+    console.error('Failed to merge branch:', error);
+  }
+}
+
+/**
+ * Delete a copilot branch
+ */
+async function deleteCopilotBranch(branchName: string): Promise<void> {
+  try {
+    if (!gitService) {
+      throw new Error('GitService not available');
+    }
+
+    const currentBranch = await gitService.getCurrentBranch();
+    
+    if (branchName === currentBranch) {
+      NotificationManager.showError('Cannot delete the current branch. Please switch to another branch first.');
+      return;
+    }
+
+    // Confirm deletion
+    const confirm = await vscode.window.showWarningMessage(
+      `Delete branch "${branchName}"? This action cannot be undone.`,
+      { modal: true },
+      'Delete'
+    );
+
+    if (confirm !== 'Delete') {
+      return;
+    }
+
+    await gitService.deleteBranch(branchName, true); // Force delete
+    NotificationManager.showSuccess(`Successfully deleted ${branchName}`);
+    recordChange(`Deleted branch ${branchName}`, 'git');
+    
+    // Refresh branches list
+    await refreshCopilotBranches();
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    NotificationManager.showError(`Failed to delete branch: ${errorMsg}`);
+    console.error('Failed to delete branch:', error);
   }
 }
 

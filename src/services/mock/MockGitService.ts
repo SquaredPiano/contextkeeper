@@ -54,6 +54,33 @@ export class MockGitService implements IGitService {
 		return this.commits.slice(0, count);
 	}
 
+	async getBranches(): Promise<string[]> {
+		await this.delay(100);
+		return [
+			'main',
+			'feature/autonomous-copilot',
+			'copilot/auto-lint-2025-11-22-14-30-45',
+			'copilot/test-gen-2025-11-22-14-35-12',
+			'copilot/idle-improvements-2025-11-22-15-00-00'
+		];
+	}
+
+	async checkoutBranch(branchName: string): Promise<void> {
+		console.log(`[Mock Git] Checking out branch: ${branchName}`);
+		await this.delay(200);
+		this.currentBranch = branchName;
+	}
+
+	async deleteBranch(branchName: string, force: boolean = false): Promise<void> {
+		console.log(`[Mock Git] Deleting branch: ${branchName} (force: ${force})`);
+		await this.delay(200);
+	}
+
+	async mergeBranch(branchName: string): Promise<void> {
+		console.log(`[Mock Git] Merging branch: ${branchName}`);
+		await this.delay(300);
+	}
+
 	private generateMockCommits(count: number): GitCommit[] {
 		const messages = [
 			'feat: Add autonomous analysis mode',

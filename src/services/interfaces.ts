@@ -164,6 +164,10 @@ export interface IGitService {
 	applyDiff(diff: string): Promise<void>;
 	getCurrentBranch(): Promise<string>;
 	getRecentCommits(count: number): Promise<GitCommit[]>;
+	getBranches(): Promise<string[]>;
+	checkoutBranch(branchName: string): Promise<void>;
+	deleteBranch(branchName: string, force?: boolean): Promise<void>;
+	mergeBranch(branchName: string): Promise<void>;
 }
 
 /**
@@ -238,6 +242,27 @@ export type AIServiceEvents = {
 // ============================================================================
 
 /**
+ * Extension change record for tracking autonomous work
+ */
+export interface ExtensionChange {
+	time: number;
+	description: string;
+	action?: string;
+	actor?: string;
+}
+
+/**
+ * Copilot branch information
+ */
+export interface CopilotBranch {
+	name: string;
+	lastCommit: string;
+	lastCommitDate: Date;
+	commitCount: number;
+	isCurrent: boolean;
+}
+
+/**
  * Messages sent FROM webview TO extension
  */
 export type UIToExtensionMessage =
@@ -246,7 +271,15 @@ export type UIToExtensionMessage =
 	| { type: 'toggleAutonomous'; enabled: boolean }
 	| { type: 'applyFix'; issueId: string }
 	| { type: 'navigateToIssue'; file: string; line: number }
-	| { type: 'dismissIssue'; issueId: string };
+	| { type: 'dismissIssue'; issueId: string }
+	| { type: 'setAutonomyDelay'; seconds: number }
+	| { type: 'setElevenVoice'; enabled: boolean }
+	| { type: 'setNotifications'; enabled: boolean }
+	| { type: 'ensureSoundOn' }
+	| { type: 'requestCopilotBranches' }
+	| { type: 'checkoutCopilotBranch'; branchName: string }
+	| { type: 'mergeCopilotBranch'; branchName: string }
+	| { type: 'deleteCopilotBranch'; branchName: string };
 
 /**
  * Messages sent FROM extension TO webview
@@ -263,7 +296,11 @@ export type ExtensionToUIMessage =
 			recommendations: Array<{ priority: 'high' | 'medium' | 'low'; message: string }>; 
 			timestamp: number;
 		}
-	};
+	}
+	| { type: 'extensionChanges'; payload: ExtensionChange[] }
+	| { type: 'elevenVoiceState'; enabled: boolean }
+	| { type: 'notificationsState'; enabled: boolean }
+	| { type: 'copilotBranches'; payload: CopilotBranch[] };
 
 export type ExtensionState =
 	| { status: 'idle' }

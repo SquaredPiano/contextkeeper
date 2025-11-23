@@ -11,6 +11,10 @@ class MockGitService implements IGitService {
     async applyDiff(diff: string): Promise<void> { }
     async getCurrentBranch(): Promise<string> { return 'main'; }
     async getRecentCommits(count: number): Promise<any[]> { return []; }
+    async getBranches(): Promise<string[]> { return ['main', 'copilot/test-branch']; }
+    async checkoutBranch(branchName: string): Promise<void> { console.log(`[MockGit] Checkout: ${branchName}`); }
+    async deleteBranch(branchName: string, force?: boolean): Promise<void> { console.log(`[MockGit] Delete: ${branchName}`); }
+    async mergeBranch(branchName: string): Promise<void> { console.log(`[MockGit] Merge: ${branchName}`); }
 }
 
 class MockAIService extends EventEmitter implements IAIService {
