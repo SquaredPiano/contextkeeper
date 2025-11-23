@@ -6,6 +6,7 @@ import { EventRecord } from '../../services/storage/schema';
 import { IAIService } from '../../services/interfaces';
 import type { Orchestrator } from '../orchestrator/orchestrator';
 import type { AutonomousAgent } from '../autonomous/AutonomousAgent';
+import type { SessionManager } from '../../managers/SessionManager';
 
 // Hardcoded idle threshold: 15 seconds exactly
 const DEFAULT_IDLE_THRESHOLD_MS = 15000;
@@ -30,17 +31,20 @@ export class IdleService implements IIdleService {
     private uiUpdateCallback?: (result: IdleImprovementsResult) => void; // NEW: Callback for UI updates
     private lastIdleSummary: string = ''; // Store summary for TTS when user returns
     private abortController: AbortController | null = null; // Controller to abort pending idle work
+    private sessionManager: SessionManager | null = null; // Track current session for updates
 
     constructor(
         storage: IStorageService, 
         config: IdleConfig = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, 
         aiService?: IAIService,
-        voiceService?: IVoiceService
+        voiceService?: IVoiceService,
+        sessionManager?: SessionManager
     ) {
         this.detector = new IdleDetector(config);
         this.storage = storage;
         this.aiService = aiService || null;
         this.voiceService = voiceService || null;
+        this.sessionManager = sessionManager || null;
     }
 
     public async initialize(): Promise<void> {
@@ -239,6 +243,21 @@ export class IdleService implements IIdleService {
                 // NEW: Send to UI via callback
                 if (this.uiUpdateCallback) {
                     this.uiUpdateCallback(result);
+                }
+                
+                // CRITICAL: Update session summary in database for vector search
+                if (this.sessionManager) {
+                    try {
+                        const sessionId = this.sessionManager.getSessionId();
+                        // Storage has access to embedding service - generate embedding
+                        const storageWithEmbedding = this.storage as unknown as { getEmbedding: (text: string) => Promise<number[]> };
+                        const embedding = await storageWithEmbedding.getEmbedding(result.summary);
+                        await this.storage.updateSessionSummary(sessionId, result.summary, embedding);
+                        console.log('[IdleService] ✅ Session summary persisted to database');
+                    } catch (error) {
+                        console.error('[IdleService] Failed to update session summary:', error);
+                        // Don't fail the workflow, just log the error
+                    }
                 }
             }
 

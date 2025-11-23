@@ -222,6 +222,9 @@ export class ContextIngestionService {
   private async processFileEdit(document: vscode.TextDocument, changes: readonly vscode.TextDocumentContentChangeEvent[]): Promise<void> {
     try {
       const relativePath = vscode.workspace.asRelativePath(document.uri);
+      
+      // Record activity for session boundary detection
+      await this.sessionManager.recordActivity(document.uri.fsPath);
 
       // Identify function context
       const affectedFunctions = new Set<string>();
