@@ -6,253 +6,1148 @@
 	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
 	<title>Copilot — Dashboard</title>
 	<style>
-		/* theme variables only */
+		/* Modern Executive Dashboard Design - Inspired by GitHub Copilot Labs & Vercel */
+
+		* {
+			box-sizing: border-box;
+		}
 
 		body {
 			color: var(--vscode-foreground);
 			background: var(--vscode-sideBar-background);
 			font-family: var(--vscode-font-family);
 			font-size: 13px;
+			line-height: 1.6;
 			margin: 0;
-			padding: 1rem;
+			padding: 16px;
 		}
 
-		.section { margin-bottom: 1.25rem; }
+		/* Card Container - Main visual grouping */
+		.card {
+			background: var(--vscode-editor-background);
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 6px;
+			padding: 16px;
+			margin-bottom: 16px;
+			transition: border-color 0.2s ease, box-shadow 0.2s ease;
+		}
 
-		.title { font-size: 13px; margin: 0 0 0.5rem 0; color: var(--vscode-editor-foreground); font-weight: 600; }
+		.card:hover {
+			border-color: var(--vscode-focusBorder);
+		}
 
-		/* Developer context: flat rows, label (small faint italic) above value */
-		.dev-list { display: flex; flex-direction: column; gap: 6px; }
+		/* Section Headers - Bold, prominent typography */
+		.section-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			margin-bottom: 16px;
+			padding-bottom: 12px;
+			border-bottom: 2px solid var(--vscode-panel-border);
+		}
 
-		.info-row { display: flex; flex-direction: column; padding: 4px 0; border-bottom: 1px solid var(--vscode-panel-border); }
-		.info-row .label { font-size: 12px; color: var(--vscode-descriptionForeground); font-style: italic; margin-bottom: 4px; }
-		.info-row .value { font-size: 13px; color: var(--vscode-foreground); }
+		.section-title {
+			font-size: 15px;
+			font-weight: 700;
+			color: var(--vscode-editor-foreground);
+			letter-spacing: -0.01em;
+			margin: 0;
+		}
 
-		/* Stat row: compact flat boxes — equal size and single-line titles */
-		.stats { margin-top: 0.75rem; display: flex; gap: 0.6rem; }
-		.stat { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding: 8px 10px; border: 1px solid var(--vscode-panel-border); border-radius: 3px; flex: 1 1 0; min-width: 0; min-height: 56px; box-sizing: border-box; background: var(--vscode-sideBar-background); color: var(--vscode-foreground); font-size: 13px; }
-		.stat .muted { font-size: 11px; color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; max-width: 100%; }
+		.section-subtitle {
+			font-size: 11px;
+			color: var(--vscode-descriptionForeground);
+			text-transform: uppercase;
+			letter-spacing: 0.05em;
+			margin-top: 2px;
+		}
 
-		/* Actions */
-		.actions { display: flex; gap: 0.5rem; margin-top: 0.75rem; align-items: center; flex-wrap: nowrap; overflow: hidden; }
-		/* unified rectangle style for action controls */
-		.action-item { display:flex; align-items:center; justify-content:center; flex: 1 1 0; min-width: 0; height:34px; padding:6px 10px; border: 1px solid var(--vscode-button-border); border-radius: 3px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); font-size: 12px; cursor: pointer; box-sizing: border-box; overflow: hidden; }
-		.action-item.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-		/* number input styled to match rectangle look */
-		#autonomyDelayInput { width:56px; height:22px; padding:2px 6px; border: none; background: transparent; color: inherit; font-size: 12px; text-align:center; outline: none; appearance: none; -webkit-appearance: none; -moz-appearance: textfield; flex: 0 1 40px; min-width: 24px; }
-		#autonomyDelayInput::-webkit-outer-spin-button, #autonomyDelayInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+		/* Section Header Actions */
+		.section-header-actions {
+			display: flex;
+			gap: 8px;
+			align-items: center;
+		}
 
-		.secs-label { font-size: 12px; color: var(--vscode-descriptionForeground); white-space: nowrap; flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+		/* Refresh Button - Responsive design */
+		.refresh-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 6px;
+			height: 28px;
+			padding: 0 10px;
+			border: 1px solid var(--vscode-button-border);
+			border-radius: 5px;
+			background: var(--vscode-button-secondaryBackground);
+			color: var(--vscode-button-secondaryForeground);
+			font-size: 11px;
+			font-weight: 500;
+			cursor: pointer;
+			transition: all 0.15s ease;
+			flex-shrink: 0;
+		}
 
-		/* Keep the left 'Every' label fully visible; let the numeric input shrink first */
-		.action-item.autonomy .secs-label:first-of-type {
-			flex: 0 0 auto;
+		.refresh-btn:hover {
+			background: var(--vscode-button-secondaryHoverBackground);
+			border-color: var(--vscode-button-hoverBorder);
+		}
+
+		.refresh-icon {
+			font-size: 12px;
+			line-height: 1;
+			display: inline-block;
+		}
+
+		.refresh-text {
 			white-space: nowrap;
-			overflow: visible;
-			text-overflow: unset;
-			margin-right: 6px;
 		}
 
-		/* ensure autonomy input container keeps the label visible and centered */
-		.action-item.autonomy { display:flex; align-items:center; gap:6px; justify-content:center; text-align:center; }
-		/* make children inline-block so centering + ellipsis behave predictably */
-		.action-item.autonomy > * { display: inline-block; vertical-align: middle; }
-		.action-item.autonomy .secs-label { text-align: center; }
+		/* Narrow layouts - icon only */
+		@media (max-width: 400px) {
+			.refresh-btn {
+				padding: 0 8px;
+				min-width: 28px;
+			}
 
-		/* Issues / Analysis minimal */
-		.issue-list { margin-top: 0.5rem; }
-		.issue-item { padding: 6px 0; border-bottom: 1px solid var(--vscode-panel-border); color: var(--vscode-foreground); font-size: 12px; }
+			.refresh-text {
+				display: none;
+			}
 
-		.small-muted { font-size: 12px; color: var(--vscode-descriptionForeground); }
+			.refresh-icon {
+				margin: 0;
+			}
+		}
 
-		/* Risk meter */
-		.risk-row { display:flex; align-items:center; gap:8px; }
-		.risk-number { font-weight:600; font-size:13px; }
-		.risk-bar { width:120px; height:8px; background: var(--vscode-panel-border); border-radius:3px; overflow:hidden; }
-		.risk-fill { height:100%; width:0%; background: #28a745; border-radius:3px; }
+		/* Very narrow layouts - even more compact */
+		@media (max-width: 300px) {
+			.refresh-btn {
+				padding: 0 6px;
+				min-width: 24px;
+				height: 24px;
+			}
 
-		/* Sound UI states use theme tokens only */
-		.sound-on { color: var(--vscode-button-foreground); font-weight: 600; }
-		.sound-off { color: var(--vscode-descriptionForeground); font-weight: 600; }
+			.refresh-icon {
+				font-size: 11px;
+			}
+		}
 
-		/* Responsive: allow stacking at very small widths */
-		@media (max-width: 320px) {
-			.actions { flex-wrap: wrap; }
-			.action-item { flex: 1 1 100%; width: 100%; min-width: 0; }
-			/* Make autonomy internals flow naturally when stacked */
-			.action-item.autonomy { justify-content: center; padding: 8px 10px; text-align:center; }
-			/* Allow the 'Every' label to wrap instead of ellipsing when stacked */
-			.action-item.autonomy .secs-label { white-space: normal; overflow: visible; text-overflow: unset; }
+		/* Collapsible Section Toggle */
+		.collapse-toggle {
+			background: none;
+			border: none;
+			color: var(--vscode-descriptionForeground);
+			cursor: pointer;
+			padding: 6px 10px;
+			border-radius: 4px;
+			font-size: 11px;
+			transition: background-color 0.15s ease, color 0.15s ease;
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			font-weight: 500;
+			flex-shrink: 0;
+			white-space: nowrap;
+		}
+
+		.collapse-toggle:hover {
+			background: var(--vscode-list-hoverBackground);
+			color: var(--vscode-foreground);
+		}
+
+		.collapse-toggle-text {
+			display: inline-block;
+		}
+
+		.collapse-toggle.collapsed .collapse-toggle-text::before {
+			content: "Expand";
+		}
+
+		.collapse-toggle:not(.collapsed) .collapse-toggle-text::before {
+			content: "Collapse";
+		}
+
+		.collapsible-content {
+			overflow: hidden;
+			transition: max-height 0.3s ease, opacity 0.2s ease;
+			margin-top: 12px;
+		}
+
+		.collapsible-content.collapsed {
+			max-height: 0;
+			opacity: 0;
+			margin: 0;
+		}
+
+		/* Responsive content - prevent overflow */
+		.collapsible-content > * {
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+			line-height: 1.6;
+		}
+
+		/* Info Grid - Clean layout for context data - Responsive */
+		.info-grid {
+			display: grid;
+			grid-template-columns: 1fr;
+			gap: 12px;
+			margin-bottom: 16px;
+		}
+
+		@media (min-width: 300px) {
+			.info-grid {
+				grid-template-columns: repeat(2, 1fr);
+			}
+		}
+
+		@media (min-width: 500px) {
+			.info-grid {
+				grid-template-columns: repeat(3, 1fr);
+			}
+		}
+
+		@media (min-width: 700px) {
+			.info-grid {
+				grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+			}
+		}
+
+		.info-item {
+			display: flex;
+			flex-direction: column;
+			padding: 12px;
+			background: var(--vscode-sideBar-background);
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 4px;
+		}
+
+		.info-item.summary-item {
+			grid-column: 1 / -1;
+		}
+
+		.info-label {
+			font-size: 10px;
+			color: var(--vscode-descriptionForeground);
+			text-transform: uppercase;
+			letter-spacing: 0.05em;
+			margin-bottom: 6px;
+			font-weight: 600;
+		}
+
+		.info-value {
+			font-size: 14px;
+			color: var(--vscode-foreground);
+			font-weight: 600;
+			word-break: break-word;
+		}
+
+		.info-value.muted {
+			font-size: 12px;
+			font-weight: 400;
+			color: var(--vscode-descriptionForeground);
+			line-height: 1.5;
+		}
+
+		/* Stats Grid - Prominent metric display - Responsive */
+		.stats-grid {
+			display: grid;
+			grid-template-columns: 1fr;
+			gap: 12px;
+			margin: 16px 0;
+		}
+
+		@media (min-width: 300px) {
+			.stats-grid {
+				grid-template-columns: repeat(2, 1fr);
+			}
+		}
+
+		@media (min-width: 500px) {
+			.stats-grid {
+				grid-template-columns: repeat(3, 1fr);
+			}
+		}
+
+		.stat-card {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			padding: 16px 12px;
+			background: var(--vscode-sideBar-background);
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 6px;
+			text-align: center;
+			transition: transform 0.15s ease, border-color 0.15s ease;
+		}
+
+		.stat-card:hover {
+			transform: translateY(-1px);
+			border-color: var(--vscode-focusBorder);
+		}
+
+		.stat-label {
+			font-size: 11px;
+			color: var(--vscode-descriptionForeground);
+			text-transform: uppercase;
+			letter-spacing: 0.05em;
+			margin-bottom: 8px;
+			font-weight: 600;
+		}
+
+		.stat-value {
+			font-size: 20px;
+			font-weight: 700;
+			color: var(--vscode-foreground);
+			line-height: 1.2;
+		}
+
+		/* Action Bar - Clean button grouping with improved spacing */
+		.action-bar {
+			display: flex;
+			gap: 10px;
+			margin-top: 20px;
+			padding-top: 16px;
+			border-top: 1px solid var(--vscode-panel-border);
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: flex-start;
+			width: 100%;
+			overflow: hidden;
+		}
+
+		/* Center align on wide layouts */
+		@media (min-width: 600px) {
+			.action-bar {
+				justify-content: center;
+			}
+		}
+
+		/* Control Group - Groups related controls together */
+		.control-group {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			flex-wrap: wrap;
+			flex-shrink: 0;
+		}
+
+		/* Toggle Switch Component */
+		.toggle-switch {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			padding: 8px 14px;
+			height: 36px;
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 6px;
+			background: var(--vscode-sideBar-background);
+			cursor: pointer;
+			transition: all 0.15s ease;
+			white-space: nowrap;
+			flex-shrink: 0;
+			min-width: 0;
+			overflow: hidden;
+		}
+
+		.toggle-switch:hover {
+			background: var(--vscode-list-hoverBackground);
+			border-color: var(--vscode-focusBorder);
+		}
+
+		.toggle-label {
+			font-size: 12px;
+			color: var(--vscode-foreground);
+			font-weight: 500;
+			margin-right: 4px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			max-width: 100px;
+		}
+
+		.toggle-switch-track {
+			position: relative;
+			width: 44px;
+			height: 24px;
+			background: var(--vscode-panel-border);
+			border-radius: 12px;
+			transition: background-color 0.2s ease;
+			flex-shrink: 0;
+		}
+
+		.toggle-switch-track.active {
+			background: var(--vscode-button-background);
+		}
+
+		.toggle-switch-thumb {
+			position: absolute;
+			top: 2px;
+			left: 2px;
+			width: 20px;
+			height: 20px;
+			background: var(--vscode-editor-background);
+			border-radius: 50%;
+			transition: transform 0.2s ease;
+			box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+		}
+
+		.toggle-switch-track.active .toggle-switch-thumb {
+			transform: translateX(20px);
+		}
+
+		/* Action Button - Standard button style */
+		.action-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			height: 36px;
+			padding: 0 16px;
+			border: 1px solid var(--vscode-button-border);
+			border-radius: 6px;
+			background: var(--vscode-button-secondaryBackground);
+			color: var(--vscode-button-secondaryForeground);
+			font-size: 12px;
+			font-weight: 500;
+			cursor: pointer;
+			transition: all 0.15s ease;
+			white-space: nowrap;
+			flex-shrink: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+
+		.action-btn:hover {
+			background: var(--vscode-button-secondaryHoverBackground);
+			border-color: var(--vscode-button-hoverBorder);
+		}
+
+		.action-btn.primary {
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+		}
+
+		.action-btn.primary:hover {
+			background: var(--vscode-button-hoverBackground);
+		}
+
+		/* Update Interval Control - Minimal compact design */
+		.interval-control {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 6px;
+			padding: 8px 12px;
+			height: 36px;
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 6px;
+			background: var(--vscode-sideBar-background);
+			flex-shrink: 0;
+			cursor: pointer;
+			transition: all 0.15s ease;
+			position: relative;
+		}
+
+		.interval-control:hover {
+			background: var(--vscode-list-hoverBackground);
+			border-color: var(--vscode-focusBorder);
+		}
+
+		.interval-control.editing {
+			cursor: default;
+			background: var(--vscode-sideBar-background);
+		}
+
+		.interval-control.editing:hover {
+			background: var(--vscode-sideBar-background);
+		}
+
+		.interval-compact {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			flex-shrink: 0;
+		}
+
+		.interval-icon {
+			font-size: 14px;
+			color: var(--vscode-descriptionForeground);
+			line-height: 1;
+		}
+
+		.interval-display {
+			font-size: 12px;
+			color: var(--vscode-foreground);
+			font-weight: 500;
+			white-space: nowrap;
+		}
+
+		.interval-input-wrapper {
+			display: none;
+			align-items: center;
+			gap: 4px;
+		}
+
+		.interval-control.editing .interval-compact {
+			display: none;
+		}
+
+		.interval-control.editing .interval-input-wrapper {
+			display: flex;
+		}
+
+		#autonomyDelayInput {
+			width: 50px;
+			height: 24px;
+			padding: 4px 6px;
+			border: 1px solid var(--vscode-input-border);
+			border-radius: 4px;
+			background: var(--vscode-input-background);
+			color: var(--vscode-input-foreground);
+			font-size: 12px;
+			text-align: center;
+			outline: none;
+			appearance: none;
+			-webkit-appearance: none;
+			-moz-appearance: textfield;
+			transition: border-color 0.15s ease;
+		}
+
+		#autonomyDelayInput:focus {
+			border-color: var(--vscode-focusBorder);
+			background: var(--vscode-input-background);
+		}
+
+		/* Prevent white flash on input */
+		#autonomyDelayInput,
+		#autonomyDelayInput:focus,
+		#autonomyDelayInput:hover {
+			background-color: var(--vscode-input-background) !important;
+		}
+
+		#autonomyDelayInput::-webkit-outer-spin-button,
+		#autonomyDelayInput::-webkit-inner-spin-button {
+			-webkit-appearance: none;
+			margin: 0;
+		}
+
+		.interval-unit {
+			font-size: 11px;
+			color: var(--vscode-descriptionForeground);
+			font-weight: 500;
+		}
+
+		/* Issues List - Clean, readable issue display */
+		.issues-list {
+			margin-top: 0;
+		}
+
+		.issue-item {
+			padding: 10px 12px;
+			margin-bottom: 6px;
+			background: var(--vscode-sideBar-background);
+			border-left: 3px solid var(--vscode-panel-border);
+			border-radius: 4px;
+			transition: background-color 0.15s ease, border-color 0.15s ease;
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+			line-height: 1.5;
+		}
+
+		.issue-item:hover {
+			background: var(--vscode-list-hoverBackground);
+		}
+
+		.issue-item:last-child {
+			margin-bottom: 0;
+		}
+
+		.issue-item.error {
+			border-left-color: var(--vscode-editorError-foreground);
+		}
+
+		.issue-item.warning {
+			border-left-color: var(--vscode-editorWarning-foreground);
+		}
+
+		.issue-item.info {
+			border-left-color: var(--vscode-editorInfo-foreground);
+		}
+
+		.issue-severity {
+			display: inline-block;
+			font-size: 10px;
+			font-weight: 700;
+			text-transform: uppercase;
+			letter-spacing: 0.05em;
+			margin-right: 10px;
+			padding: 2px 6px;
+			border-radius: 3px;
+			background: var(--vscode-panel-border);
+			color: var(--vscode-foreground);
+		}
+
+		.issue-message {
+			font-size: 12px;
+			color: var(--vscode-foreground);
+			line-height: 1.5;
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+		}
+
+		/* Risk Meter - Visual risk indicator */
+		.risk-meter {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			margin: 16px 0;
+			padding: 12px;
+			background: var(--vscode-sideBar-background);
+			border-radius: 4px;
+		}
+
+		.risk-label {
+			font-size: 11px;
+			color: var(--vscode-descriptionForeground);
+			text-transform: uppercase;
+			letter-spacing: 0.05em;
+			font-weight: 600;
+			min-width: 40px;
+		}
+
+		.risk-value {
+			font-size: 16px;
+			font-weight: 700;
+			min-width: 50px;
+		}
+
+		.risk-bar-container {
+			flex: 1;
+			height: 8px;
+			background: var(--vscode-panel-border);
+			border-radius: 4px;
+			overflow: hidden;
+		}
+
+		.risk-bar-fill {
+			height: 100%;
+			width: 0%;
+			background: #28a745;
+			border-radius: 4px;
+			transition: width 0.3s ease, background 0.3s ease;
+		}
+
+		/* Count Inline - Clean text display */
+		.count-inline {
+			display: inline;
+			font-weight: 400;
+			color: var(--vscode-descriptionForeground);
+			margin-left: 6px;
+		}
+
+		/* Empty State */
+		.empty-state {
+			padding: 24px;
+			text-align: center;
+			color: var(--vscode-descriptionForeground);
+			font-size: 12px;
+		}
+
+		/* Branch Item - Enhanced styling with responsive layout */
+		.branch-item {
+			padding: 12px;
+			margin-bottom: 8px;
+			background: var(--vscode-sideBar-background);
+			border: 1px solid var(--vscode-panel-border);
+			border-radius: 4px;
+			transition: all 0.15s ease;
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+		}
+
+		.branch-item:hover {
+			background: var(--vscode-list-hoverBackground);
+			border-color: var(--vscode-focusBorder);
+		}
+
+		.branch-item:last-child {
+			margin-bottom: 0;
+		}
+
+		.branch-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			margin-bottom: 8px;
+			gap: 8px;
+			flex-wrap: wrap;
+			overflow: hidden;
+		}
+
+		.branch-name {
+			font-size: 13px;
+			font-weight: 600;
+			color: var(--vscode-foreground);
+		}
+
+		.branch-actions {
+			display: flex;
+			gap: 6px;
+			flex-shrink: 0;
+			flex-wrap: wrap;
+			margin-left: auto;
+		}
+
+		.branch-btn {
+			padding: 4px 10px;
+			font-size: 11px;
+			height: 26px;
+			flex-shrink: 0;
+			white-space: nowrap;
+			min-width: fit-content;
+		}
+
+		/* Responsive branch actions */
+		@media (max-width: 400px) {
+			.branch-header {
+				flex-direction: column;
+				align-items: flex-start;
+			}
+
+			.branch-actions {
+				margin-left: 0;
+				width: 100%;
+				margin-top: 8px;
+			}
+
+			.branch-btn {
+				flex: 1 1 0;
+				min-width: 0;
+				font-size: 10px;
+				padding: 4px 8px;
+			}
+		}
+
+		.branch-meta {
+			font-size: 11px;
+			color: var(--vscode-descriptionForeground);
+			line-height: 1.6;
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+			margin-top: 4px;
+		}
+
+		.branch-current {
+			display: inline-block;
+			padding: 2px 6px;
+			background: var(--vscode-button-background);
+			color: var(--vscode-button-foreground);
+			border-radius: 3px;
+			font-size: 10px;
+			font-weight: 600;
+			margin-right: 8px;
+		}
+
+		/* Change Item */
+		.change-item {
+			padding: 10px 12px;
+			margin-bottom: 6px;
+			background: var(--vscode-sideBar-background);
+			border-left: 3px solid var(--vscode-panel-border);
+			border-radius: 4px;
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+			line-height: 1.5;
+		}
+
+		.change-item:last-child {
+			margin-bottom: 0;
+		}
+
+		.change-actor {
+			display: inline-block;
+			font-size: 10px;
+			color: var(--vscode-descriptionForeground);
+			text-transform: uppercase;
+			letter-spacing: 0.05em;
+			margin-right: 8px;
+			font-weight: 600;
+		}
+
+		.change-description {
+			font-size: 12px;
+			color: var(--vscode-foreground);
+			font-weight: 500;
+			margin: 4px 0;
+			word-wrap: break-word;
+			overflow-wrap: break-word;
+			line-height: 1.5;
+		}
+
+		.change-time {
+			font-size: 11px;
+			color: var(--vscode-descriptionForeground);
+			margin-top: 4px;
+		}
+
+		/* Responsive Design - Enhanced breakpoints */
+		@media (max-width: 300px) {
+			.stats-grid {
+				grid-template-columns: 1fr;
+			}
+
+			.info-grid {
+				grid-template-columns: 1fr;
+			}
+
+			.action-bar {
+				flex-direction: column;
+				align-items: stretch;
+			}
+
+			.control-group {
+				width: 100%;
+				flex-direction: column;
+			}
+
+			.action-btn,
+			.toggle-switch,
+			.interval-control {
+				width: 100%;
+				justify-content: space-between;
+			}
+		}
+
+		@media (min-width: 300px) and (max-width: 499px) {
+			.stats-grid {
+				grid-template-columns: repeat(2, 1fr);
+			}
+		}
+
+		@media (min-width: 500px) {
+			.stats-grid {
+				grid-template-columns: repeat(3, 1fr);
+			}
+		}
+
+		/* Prevent overflow on all elements */
+		.card {
+			overflow: hidden;
+		}
+
+		.action-bar > * {
+			max-width: 100%;
+			box-sizing: border-box;
 		}
 	</style>
 </head>
 <body>
 
-	<div class="section" id="contextSection">
-		<div class="title">Developer Context</div>
-
-		<div class="dev-list">
-			<div class="info-row">
-				<div class="label">Last File</div>
-				<div class="value" id="activeFile">-</div>
+	<!-- Developer Context Card -->
+	<div class="card" id="contextSection">
+		<div class="section-header">
+			<div>
+				<h2 class="section-title">Developer Context</h2>
+				<div class="section-subtitle">Current workspace state</div>
+			</div>
 			</div>
 
-			<div class="info-row">
-				<div class="label">Branch</div>
-				<div class="value" id="currentBranch">-</div>
+		<div class="info-grid">
+			<div class="info-item">
+				<div class="info-label">Active File</div>
+				<div class="info-value" id="activeFile">-</div>
+			</div>
+			<div class="info-item">
+				<div class="info-label">Branch</div>
+				<div class="info-value" id="currentBranch">-</div>
+			</div>
+			<div class="info-item">
+				<div class="info-label">Cursor Line</div>
+				<div class="info-value" id="lastLine">-</div>
+			</div>
 			</div>
 
-			<div class="info-row">
-				<div class="label">Last Line</div>
-				<div class="value" id="lastLine">-</div>
+		<div class="info-item summary-item">
+			<div class="info-label">Summary</div>
+			<div class="info-value muted" id="analysisSummary">No summary yet.</div>
 			</div>
 
-			<div class="info-row">
-				<div class="label">Summary</div>
-				<div class="value small-muted" id="analysisSummary">No summary yet.</div>
+		<div class="stats-grid">
+			<div class="stat-card" title="Total number of edits made in the current session">
+				<div class="stat-label">Session Edits</div>
+				<div class="stat-value" id="totalEdits">0</div>
 			</div>
-
-			<div class="stats" id="statsRow">
-				<div class="stat">
-					<div class="muted">AI Edits</div>
-					<div id="totalEdits">0</div>
+			<div class="stat-card">
+				<div class="stat-label">Files</div>
+				<div class="stat-value" id="filesEdited">0</div>
 				</div>
-				<div class="stat">
-					<div class="muted">Files Edited</div>
-					<div id="filesEdited">0</div>
-				</div>
-				<div class="stat">
-					<div class="muted">Uncommitted</div>
-					<div id="uncommittedChanges">0</div>
+			<div class="stat-card">
+				<div class="stat-label">Uncommitted</div>
+				<div class="stat-value" id="uncommittedChanges">0</div>
 				</div>
 			</div>
 
-			<div class="actions" style="align-items:center;">
-				<button id="refreshContextBtn" class="action-item">Refresh</button>
-				<button id="toggleSoundBtn" class="action-item">Sound: <span id="soundStatus" class="sound-on">ON</span></button>
-				<button id="toggleNotifBtn" class="action-item">Notifs: <span id="notifStatus" class="sound-on">ON</span></button>
-				<div class="action-item autonomy" style="padding:4px 8px; gap:6px; justify-content:center;">
-					<span class="secs-label">Every</span>
+		<div class="action-bar">
+			<button id="refreshContextBtn" class="action-btn">Refresh</button>
+			
+			<div class="control-group">
+				<button id="toggleSoundBtn" class="toggle-switch" role="switch" aria-checked="true">
+					<span class="toggle-label">Sound</span>
+					<div class="toggle-switch-track active" id="soundTrack">
+						<div class="toggle-switch-thumb"></div>
+					</div>
+				</button>
+				
+				<button id="toggleNotifBtn" class="toggle-switch" role="switch" aria-checked="true">
+					<span class="toggle-label">Notifications</span>
+					<div class="toggle-switch-track active" id="notifTrack">
+						<div class="toggle-switch-thumb"></div>
+					</div>
+				</button>
+			</div>
+
+			<div class="interval-control" title="Update interval in seconds" id="intervalControl">
+				<div class="interval-compact">
+					<span class="interval-icon">⏱</span>
+					<span class="interval-display" id="autonomyDelayDisplay">15s</span>
+				</div>
+				<div class="interval-input-wrapper">
 					<input id="autonomyDelayInput" type="number" min="0" step="1" aria-label="Autonomy delay in seconds" title="Seconds until autonomy starts" />
-					<span class="secs-label">s</span>
+					<span class="interval-unit">s</span>
 				</div>
 			</div>
 		</div>
 	</div>
 
-	<div class="section" id="issuesSection">
-		<div class="title">Issues Found</div>
-
-		<div class="info-row" style="border-bottom:0; padding:0;">
-			<div style="display:flex; gap:12px; align-items:center;">
-				<div class="small-muted">Issues</div>
-				<div id="issuesCount">0</div>
+	<!-- Issues Card -->
+	<div class="card" id="issuesSection">
+		<div class="section-header">
+			<div>
+				<h2 class="section-title">
+					Issues Found<span class="count-inline" id="issuesCount">(0)</span>
+				</h2>
+				<div class="section-subtitle">Code analysis results</div>
 			</div>
-			<div class="risk-row" style="margin-top:6px;">
-				<div class="small-muted">Risk</div>
-				<div id="riskNumber" class="risk-number">0/10</div>
-				<div class="risk-bar"><div id="riskFill" class="risk-fill"></div></div>
+			<button class="collapse-toggle" id="issuesToggle">
+				<span class="collapse-toggle-text"></span>
+			</button>
+		</div>
+
+		<div class="risk-meter">
+			<div class="risk-label">Risk</div>
+			<div class="risk-value" id="riskNumber">0/10</div>
+			<div class="risk-bar-container">
+				<div class="risk-bar-fill" id="riskFill"></div>
+			</div>
 			</div>
 
-			<!-- Issues list: re-introduced so analysis can render below 'Issues Found' -->
-			<div id="issuesContainer" class="issue-list"><div class="small-muted">No issues found.</div></div>
+		<div class="collapsible-content" id="issuesContent">
+			<div id="issuesContainer" class="issues-list">
+				<div class="empty-state">No issues found.</div>
+			</div>
+		</div>
 		</div>
 		
-		<!-- issues container removed -->
+	<!-- Recent Changes Card -->
+	<div class="card" id="extensionChangesSection">
+		<div class="section-header">
+			<div>
+				<h2 class="section-title">
+					Recent Changes<span class="count-inline" id="extensionChangesCount">(0)</span>
+				</h2>
+			</div>
+			<button class="collapse-toggle" id="changesToggle">
+				<span class="collapse-toggle-text"></span>
+			</button>
 	</div>
 
-	<!-- Extension Changes: list of changes performed by the extension while the webview was closed/away -->
-	<div class="section" id="extensionChangesSection">
-		<div class="title">Recent Changes</div>
-		<div class="info-row" style="border-bottom:0; padding:0;">
-			<!-- subtitle removed per request -->
-			<div style="display:flex; gap:12px; align-items:center; margin-top:6px;">
-				<div class="small-muted">Changes</div>
-				<div id="extensionChangesCount">0</div>
+		<div class="collapsible-content" id="changesContent">
+			<div id="extensionChangesContainer">
+				<div class="empty-state">No recorded changes.</div>
 			</div>
-			<div id="extensionChangesContainer" class="issue-list"><div class="small-muted">No recorded changes.</div></div>
 		</div>
 	</div>
 
-	<!-- Copilot Branches: list of branches created by autonomous agent -->
-	<div class="section" id="copilotBranchesSection">
-		<div class="title">Copilot Branches</div>
-		<div class="info-row" style="border-bottom:0; padding:0;">
-			<div style="display:flex; gap:12px; align-items:center; margin-top:6px;">
-				<div class="small-muted">Branches</div>
-				<div id="copilotBranchesCount">0</div>
-				<button id="refreshBranchesBtn" class="action-item" style="margin-left:auto; padding:4px 8px; font-size:11px;">Refresh</button>
+	<!-- Copilot Branches Card -->
+	<div class="card" id="copilotBranchesSection">
+		<div class="section-header">
+			<div>
+				<h2 class="section-title">
+					Copilot Branches<span class="count-inline" id="copilotBranchesCount">(0)</span>
+				</h2>
 			</div>
-			<div id="copilotBranchesContainer" class="issue-list"><div class="small-muted">No copilot branches found.</div></div>
+			<button class="collapse-toggle" id="branchesToggle">
+				<span class="collapse-toggle-text"></span>
+			</button>
+		</div>
+
+		<div class="collapsible-content" id="branchesContent">
+			<div id="copilotBranchesContainer">
+				<div class="empty-state">No copilot branches found.</div>
+			</div>
 		</div>
 	</div>
 
 	<script>
 		const vscode = acquireVsCodeApi();
 
-		const ids = ['activeFile','currentBranch','lastLine','analysisSummary','totalEdits','filesEdited','uncommittedChanges','refreshContextBtn','toggleSoundBtn','notifStatus','soundStatus','issuesCount','riskNumber','riskFill'];
+		const ids = ['activeFile','currentBranch','lastLine','analysisSummary','totalEdits','filesEdited','uncommittedChanges','refreshContextBtn','toggleSoundBtn','toggleNotifBtn','issuesCount','riskNumber','riskFill'];
 		const el = {};
 		ids.forEach(id => el[id] = document.getElementById(id));
 		const issuesContainerEl = document.getElementById('issuesContainer');
+		const extensionChangesContainer = document.getElementById('extensionChangesContainer');
+		const copilotBranchesContainer = document.getElementById('copilotBranchesContainer');
+
+		// Collapsible sections
+		function setupCollapsible(toggleId, contentId) {
+			const toggle = document.getElementById(toggleId);
+			const content = document.getElementById(contentId);
+			if (!toggle || !content) return;
+
+			// Initialize as expanded (not collapsed)
+			toggle.classList.remove('collapsed');
+			content.classList.remove('collapsed');
+
+			toggle.addEventListener('click', () => {
+				const isCollapsed = toggle.classList.contains('collapsed');
+				toggle.classList.toggle('collapsed', !isCollapsed);
+				content.classList.toggle('collapsed', !isCollapsed);
+			});
+		}
+
+		setupCollapsible('issuesToggle', 'issuesContent');
+		setupCollapsible('changesToggle', 'changesContent');
+		setupCollapsible('branchesToggle', 'branchesContent');
 
 		// Buttons
 		el.refreshContextBtn.addEventListener('click', () => {
 			vscode.postMessage({ type: 'requestContext' });
 		});
 
-		// Sound toggle state stored locally but extension is authoritative
+		// Sound toggle
 		const SOUND_KEY = 'elevenVoiceEnabled';
 		function setSoundUI(enabled) {
-			el.soundStatus.textContent = enabled ? 'ON' : 'OFF';
-			el.soundStatus.className = enabled ? 'sound-on' : 'sound-off';
+			const trackEl = document.getElementById('soundTrack');
+			const btnEl = document.getElementById('toggleSoundBtn');
+			if (trackEl) {
+				trackEl.classList.toggle('active', enabled);
+			}
+			if (btnEl) {
+				btnEl.setAttribute('aria-checked', enabled);
+			}
 		}
 
-		// Notifications toggle (controls whether extension shows pop-ups)
+		// Notifications toggle
 		const NOTIF_KEY = 'copilotNotifsEnabled';
 		function setNotifUI(enabled){
-			const nEl = document.getElementById('notifStatus');
-			if (!nEl) return;
-			nEl.textContent = enabled ? 'ON' : 'OFF';
-			nEl.className = enabled ? 'sound-on' : 'sound-off';
+			const trackEl = document.getElementById('notifTrack');
+			const btnEl = document.getElementById('toggleNotifBtn');
+			if (trackEl) {
+				trackEl.classList.toggle('active', enabled);
+			}
+			if (btnEl) {
+				btnEl.setAttribute('aria-checked', enabled);
+			}
 		}
 
-		// Autonomy delay input: initialize and wire to extension
+		// Autonomy delay input - minimal compact design
 		const AUTONOMY_KEY = 'autonomyDelay';
 		const autonomyInput = document.getElementById('autonomyDelayInput');
-		function setAutonomyUI(seconds){
-			autonomyInput.value = String(seconds);
+		const autonomyDisplay = document.getElementById('autonomyDelayDisplay');
+		const intervalControl = document.getElementById('intervalControl');
+
+		function updateAutonomyDisplay(seconds) {
+			if (autonomyDisplay) {
+				autonomyDisplay.textContent = seconds + 's';
+			}
+			if (intervalControl) {
+				intervalControl.setAttribute('title', `Update interval: ${seconds} seconds`);
+			}
 		}
+
+		function setAutonomyUI(seconds){
+			const val = String(seconds);
+			if (autonomyInput) autonomyInput.value = val;
+			updateAutonomyDisplay(seconds);
+		}
+
 		function sendAutonomyDelay(seconds){
 			vscode.postMessage({ type: 'setAutonomyDelay', seconds });
 		}
-		// init value (default 15s)
-		// REMOVED: Auto-analysis timer - analysis should ONLY run via idle detection, not periodic polling
-		// let _autoTimer = null;
-		// function scheduleAutoAnalysis(seconds){
-		// 	if (_autoTimer) clearInterval(_autoTimer);
-		// 	if (!Number.isFinite(seconds) || seconds <= 0) return;
-		// 	_autoTimer = setInterval(()=>{ vscode.postMessage({ type: 'triggerAnalysis' }); }, seconds * 1000);
-		// }
+
+		let _autoTimer = null;
+		function scheduleAutoAnalysis(seconds){
+			if (_autoTimer) clearInterval(_autoTimer);
+			if (!Number.isFinite(seconds) || seconds <= 0) return;
+			_autoTimer = setInterval(()=>{ vscode.postMessage({ type: 'triggerAnalysis' }); }, seconds * 1000);
+		}
+
+		function handleAutonomyChange(value) {
+			let v = Number(value);
+			if (!Number.isFinite(v) || v < 0) v = 0;
+			v = Math.round(v);
+			try { localStorage.setItem(AUTONOMY_KEY, String(v)); } catch (e) {}
+			setAutonomyUI(v);
+			sendAutonomyDelay(v);
+			scheduleAutoAnalysis(v);
+		}
+
+		function exitEditMode() {
+			if (intervalControl) {
+				intervalControl.classList.remove('editing');
+				if (autonomyInput) {
+					autonomyInput.blur();
+				}
+			}
+		}
 
 		try{
 			const stored = localStorage.getItem(AUTONOMY_KEY);
 			const val = stored === null ? 15 : Number(stored);
 			const initial = Number.isFinite(val) ? val : 15;
 			setAutonomyUI(initial);
-			// notify extension of idle threshold only - DO NOT trigger periodic analysis
 			sendAutonomyDelay(initial);
-			// REMOVED: scheduleAutoAnalysis(initial);
-		} catch(e) { setAutonomyUI(15); sendAutonomyDelay(15); }
+			scheduleAutoAnalysis(initial);
+		} catch(e) { 
+			setAutonomyUI(15); 
+			sendAutonomyDelay(15); 
+			scheduleAutoAnalysis(15); 
+		}
 
-		autonomyInput.addEventListener('change', () => {
-			let v = Number(autonomyInput.value);
-			if (!Number.isFinite(v) || v < 0) v = 0;
-			v = Math.round(v);
-			try { localStorage.setItem(AUTONOMY_KEY, String(v)); } catch (e) {}
-			setAutonomyUI(v);
-			sendAutonomyDelay(v);
-			// REMOVED: scheduleAutoAnalysis(v); - this was causing analysis to run while typing!
-		});
+		// Click to edit interval
+		if (intervalControl) {
+			intervalControl.addEventListener('click', (e) => {
+				if (!intervalControl.classList.contains('editing')) {
+					intervalControl.classList.add('editing');
+					if (autonomyInput) {
+						setTimeout(() => {
+							autonomyInput.focus();
+							autonomyInput.select();
+						}, 10);
+					}
+				}
+			});
+		}
+
+		if (autonomyInput) {
+			autonomyInput.addEventListener('change', () => {
+				handleAutonomyChange(autonomyInput.value);
+				exitEditMode();
+			});
+
+			autonomyInput.addEventListener('blur', () => {
+				exitEditMode();
+			});
+
+			autonomyInput.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter') {
+					handleAutonomyChange(autonomyInput.value);
+					exitEditMode();
+				} else if (e.key === 'Escape') {
+					exitEditMode();
+				}
+			});
+		}
 
 		document.getElementById('toggleSoundBtn').addEventListener('click', () => {
 			let current = null;
@@ -272,13 +1167,13 @@
 			vscode.postMessage({ type: 'setNotifications', enabled: next });
 		});
 
-		// Color interpolation helper (green -> dark red)
+		// Color interpolation helper
 		function lerp(a, b, t) { return a + (b - a) * t; }
 		function hexToRgb(hex){ hex = hex.replace('#',''); return [parseInt(hex.slice(0,2),16),parseInt(hex.slice(2,4),16),parseInt(hex.slice(4,6),16)]; }
 		function rgbToHex(r,g,b){ return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join(''); }
 		function riskColor(value){
-			const low = hexToRgb('#28a745'); // green
-			const high = hexToRgb('#7a0000'); // dark red
+			const low = hexToRgb('#28a745');
+			const high = hexToRgb('#7a0000');
 			const t = Math.max(0, Math.min(1, value/10));
 			const r = Math.round(lerp(low[0], high[0], t));
 			const g = Math.round(lerp(low[1], high[1], t));
@@ -305,25 +1200,29 @@
 					setSoundUI(Boolean(msg.enabled));
 					break;
 				case 'stateChanged':
-					// no analyze button UI to update; extension state changes can be handled here if needed
 					break;
 			}
 		});
 
 		function updateContext(ctx){
-			el.activeFile.textContent = (ctx && ctx.files && ctx.files.activeFile) ? ctx.files.activeFile.split('/').pop() : '-';
-			el.currentBranch.textContent = (ctx && ctx.git && ctx.git.currentBranch) ? ctx.git.currentBranch : '-';
-			el.lastLine.textContent = (ctx && ctx.cursor && typeof ctx.cursor.line === 'number') ? String(ctx.cursor.line) : '-';
-			el.totalEdits.textContent = String((ctx && ctx.session && ctx.session.totalEdits) ? ctx.session.totalEdits : 0);
-			el.filesEdited.textContent = String((ctx && ctx.files && ctx.files.recentlyEdited) ? ctx.files.recentlyEdited.length : 0);
-			el.uncommittedChanges.textContent = String((ctx && ctx.git && ctx.git.uncommittedChanges) ? ctx.git.uncommittedChanges.length : 0);
+			if (el.activeFile) el.activeFile.textContent = (ctx && ctx.files && ctx.files.activeFile) ? ctx.files.activeFile.split('/').pop() : '-';
+			if (el.currentBranch) el.currentBranch.textContent = (ctx && ctx.git && ctx.git.currentBranch) ? ctx.git.currentBranch : '-';
+			if (el.lastLine) el.lastLine.textContent = (ctx && ctx.cursor && typeof ctx.cursor.line === 'number') ? String(ctx.cursor.line) : '-';
+			if (el.totalEdits) el.totalEdits.textContent = String((ctx && ctx.session && ctx.session.totalEdits) ? ctx.session.totalEdits : 0);
+			if (el.filesEdited) el.filesEdited.textContent = String((ctx && ctx.files && ctx.files.recentlyEdited) ? ctx.files.recentlyEdited.length : 0);
+			if (el.uncommittedChanges) el.uncommittedChanges.textContent = String((ctx && ctx.git && ctx.git.uncommittedChanges) ? ctx.git.uncommittedChanges.length : 0);
 		}
 
 		function updateAnalysis(analysis){
-			el.issuesCount.textContent = (analysis && analysis.issues) ? String(analysis.issues.length) : '0';
+			if (el.issuesCount) {
+				const count = (analysis && analysis.issues) ? analysis.issues.length : 0;
+				el.issuesCount.textContent = `(${count})`;
+			}
 			const summary = (analysis && analysis.summary) ? analysis.summary
-				: (analysis && analysis.suggestions && analysis.suggestions.length>0) ? analysis.suggestions.slice(0,2).map(s=>s.message).join(' ') : (analysis && analysis.issues && analysis.issues.length>0) ? `Found ${analysis.issues.length} issues; top: ${analysis.issues[0].message}` : 'Analysis complete.';
-			el.analysisSummary.textContent = summary;
+				: (analysis && analysis.suggestions && analysis.suggestions.length>0) ? analysis.suggestions.slice(0,2).map(s=>s.message).join(' ') 
+				: (analysis && analysis.issues && analysis.issues.length>0) ? `Found ${analysis.issues.length} issues; top: ${analysis.issues[0].message}` 
+				: 'Analysis complete.';
+			if (el.analysisSummary) el.analysisSummary.textContent = summary;
 
 			// Determine numeric risk 0-10
 			let riskVal = 0;
@@ -339,51 +1238,63 @@
 			const color = riskColor(riskVal);
 			const rn = document.getElementById('riskNumber');
 			const rf = document.getElementById('riskFill');
-			if (rn) rn.textContent = `${riskVal}/10`;
-			if (rn) rn.style.color = color;
-			if (rf) { rf.style.width = `${(riskVal/10)*100}%`; rf.style.background = color; }
+			if (rn) {
+				rn.textContent = `${riskVal}/10`;
+				rn.style.color = color;
+			}
+			if (rf) { 
+				rf.style.width = `${(riskVal/10)*100}%`; 
+				rf.style.background = color; 
+			}
 
 			if (analysis && analysis.issues && analysis.issues.length>0){
-				if (issuesContainerEl) issuesContainerEl.innerHTML = analysis.issues.slice(0,8).map(i=>`<div class=\"issue-item\">${i.severity.toUpperCase()}: ${i.message}</div>`).join('');
+				if (issuesContainerEl) {
+					issuesContainerEl.innerHTML = analysis.issues.slice(0,8).map(i => {
+						const severityClass = i.severity || 'info';
+						return `<div class="issue-item ${severityClass}">
+							<span class="issue-severity">${severityClass.toUpperCase()}</span>
+							<span class="issue-message">${i.message}</span>
+						</div>`;
+					}).join('');
+				}
 			} else {
-				if (issuesContainerEl) issuesContainerEl.innerHTML = '<div class="small-muted">No issues found.</div>';
+				if (issuesContainerEl) issuesContainerEl.innerHTML = '<div class="empty-state">No issues found.</div>';
 			}
 		}
 
 		function updateExtensionChanges(changes){
 			const countEl = document.getElementById('extensionChangesCount');
-			const cont = document.getElementById('extensionChangesContainer');
-			if (!cont) return;
+			if (!extensionChangesContainer) return;
 			if (!changes || !Array.isArray(changes) || changes.length === 0){
-				if (countEl) countEl.textContent = '0';
-				cont.innerHTML = '<div class="small-muted">No recorded changes.</div>';
+				if (countEl) countEl.textContent = '(0)';
+				extensionChangesContainer.innerHTML = '<div class="empty-state">No recorded changes.</div>';
 				return;
 			}
-			if (countEl) countEl.textContent = String(changes.length);
-			cont.innerHTML = changes.slice(0,50).map(c => {
+			if (countEl) countEl.textContent = `(${changes.length})`;
+			extensionChangesContainer.innerHTML = changes.slice(0,50).map(c => {
 				const time = c.time ? (new Date(c.time)).toLocaleString() : '';
 				const what = c.description || c.message || c.action || JSON.stringify(c);
-				const who = c.actor ? `<span style="color:var(--vscode-descriptionForeground); font-size:11px; margin-right:6px">${c.actor}</span>` : '';
-				return `<div class=\"issue-item\">${who}<strong>${what}</strong><div class=\"small-muted\">${time}</div></div>`;
+				const who = c.actor ? `<span class="change-actor">${c.actor}</span>` : '';
+				return `<div class="change-item">
+					${who}
+					<div class="change-description">${what}</div>
+					<div class="change-time">${time}</div>
+				</div>`;
 			}).join('');
 		}
 
 		function updateIdleImprovements(payload){
-			// Display "While you were away" summary
 			if (!payload) return;
 			
 			const summary = payload.summary || 'Completed idle analysis';
 			const testsCount = payload.testsGenerated || 0;
 			const recommendations = payload.recommendations || [];
-			const timestamp = payload.timestamp ? new Date(payload.timestamp).toLocaleString() : '';
 			
-			// Update analysis summary with idle improvements
 			const summaryEl = document.getElementById('analysisSummary');
 			if (summaryEl) {
 				summaryEl.textContent = `🎯 While you were away: ${summary}`;
 			}
 			
-			// Add to extension changes
 			const changes = [];
 			changes.push({
 				time: payload.timestamp || Date.now(),
@@ -410,7 +1321,6 @@
 				});
 			});
 			
-			// Prepend to existing changes
 			const existingChanges = JSON.parse(localStorage.getItem('extensionChanges') || '[]');
 			const merged = [...changes, ...existingChanges].slice(0, 100);
 			try {
@@ -418,90 +1328,76 @@
 			} catch (e) {}
 			
 			updateExtensionChanges(merged);
-			
-			// Show welcome back notification (visual only, no popup)
-			console.log('[Dashboard] Idle improvements displayed:', summary, 'Tests:', testsCount, 'Recommendations:', recommendations.length);
 		}
 
 		function updateCopilotBranches(branches){
 			const countEl = document.getElementById('copilotBranchesCount');
-			const cont = document.getElementById('copilotBranchesContainer');
-			if (!cont) return;
+			if (!copilotBranchesContainer) return;
 			if (!branches || !Array.isArray(branches) || branches.length === 0){
-				if (countEl) countEl.textContent = '0';
-				cont.innerHTML = '<div class="small-muted">No copilot branches found.</div>';
+				if (countEl) countEl.textContent = '(0)';
+				copilotBranchesContainer.innerHTML = '<div class="empty-state">No copilot branches found.</div>';
 				return;
 			}
-			if (countEl) countEl.textContent = String(branches.length);
+			if (countEl) countEl.textContent = `(${branches.length})`;
 			
-			// Use data attributes instead of onclick for security
-			// Escape branch names for HTML attributes
-			cont.innerHTML = branches.map((b) => {
+			copilotBranchesContainer.innerHTML = branches.map((b) => {
 				const date = b.lastCommitDate ? (new Date(b.lastCommitDate)).toLocaleString() : '';
-				const current = b.isCurrent ? '<span style="color:var(--vscode-textLink-foreground); font-size:11px; margin-right:6px">[current]</span>' : '';
+				const current = b.isCurrent ? '<span class="branch-current">CURRENT</span>' : '';
 				const commitMsg = b.lastCommit ? b.lastCommit.substring(0, 60) + (b.lastCommit.length > 60 ? '...' : '') : 'No commits';
-				// Escape HTML and quotes for data attribute
 				const branchNameEscaped = b.name.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-				return `<div class="issue-item branch-item" style="display:flex; flex-direction:column; gap:4px;">
-					<div style="display:flex; align-items:center; gap:8px;">
+				return `<div class="branch-item">
+					<div class="branch-header">
+						<div>
 						${current}
-						<strong style="font-size:12px;">${b.name}</strong>
-						<div style="display:flex; gap:4px; margin-left:auto;">
-							${!b.isCurrent ? `<button class="action-item branch-checkout" style="padding:2px 6px; font-size:10px;" data-branch="${branchNameEscaped}" type="button">Checkout</button>` : ''}
-							<button class="action-item branch-merge" style="padding:2px 6px; font-size:10px;" data-branch="${branchNameEscaped}" type="button">Merge</button>
-							<button class="action-item branch-delete" style="padding:2px 6px; font-size:10px;" data-branch="${branchNameEscaped}" type="button">Delete</button>
+							<span class="branch-name">${b.name}</span>
 						</div>
+						<div class="branch-actions">
+							${!b.isCurrent ? `<button class="action-btn branch-btn branch-checkout" data-branch="${branchNameEscaped}" type="button">Checkout</button>` : ''}
+							<button class="action-btn branch-btn branch-merge" data-branch="${branchNameEscaped}" type="button">Merge</button>
+							<button class="action-btn branch-btn branch-delete" data-branch="${branchNameEscaped}" type="button">Delete</button>
 					</div>
-					<div class="small-muted" style="font-size:11px;">${commitMsg}</div>
-					<div class="small-muted" style="font-size:10px;">${date}</div>
+					</div>
+					<div class="branch-meta">${commitMsg}</div>
+					<div class="branch-meta" style="font-size: 10px; margin-top: 4px;">${date}</div>
 				</div>`;
 			}).join('');
 		}
 
-		// Set up event delegation for branch buttons (once, on page load)
-		// Use document-level delegation so it works even when innerHTML is updated
+		// Event delegation for branch buttons
 		document.addEventListener('click', (e) => {
 			const target = e.target;
 			if (!target || !target.classList) return;
 			
-			// Check if clicked element is a branch button or inside one
 			const button = target.closest('.branch-checkout, .branch-merge, .branch-delete');
 			if (!button) return;
 			
 			const branchName = button.getAttribute('data-branch');
 			if (!branchName) return;
 			
-			// Decode HTML entities
 			const decodedBranchName = branchName.replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 			
 			if (button.classList.contains('branch-checkout')) {
 				vscode.postMessage({ type: 'checkoutCopilotBranch', branchName: decodedBranchName });
 			} else if (button.classList.contains('branch-merge')) {
-				// Extension will handle confirmation
 				vscode.postMessage({ type: 'mergeCopilotBranch', branchName: decodedBranchName });
 			} else if (button.classList.contains('branch-delete')) {
-				// Extension will handle confirmation
 				vscode.postMessage({ type: 'deleteCopilotBranch', branchName: decodedBranchName });
 			}
 		});
 
-		// Refresh branches button
-		const refreshBranchesBtn = document.getElementById('refreshBranchesBtn');
-		if (refreshBranchesBtn) {
-			refreshBranchesBtn.addEventListener('click', () => {
-				vscode.postMessage({ type: 'requestCopilotBranches' });
-			});
-		}
 
-		// Request initial context and ensure sound is enabled by default via extension
+		// Request initial data
 		vscode.postMessage({ type: 'requestContext' });
-		// Ask extension to ensure sound-on-open; extension will respond with 'elevenVoiceState'
 		vscode.postMessage({ type: 'ensureSoundOn' });
-		// Request copilot branches on load
 		vscode.postMessage({ type: 'requestCopilotBranches' });
 
-		// Initialize UI (if extension has not yet responded, fall back to true)
-		try { const stored = localStorage.getItem(SOUND_KEY); setSoundUI(stored === null ? true : stored === 'true'); } catch (e) { setSoundUI(true); }
+		// Initialize UI
+		try { 
+			const stored = localStorage.getItem(SOUND_KEY); 
+			setSoundUI(stored === null ? true : stored === 'true'); 
+		} catch (e) { 
+			setSoundUI(true); 
+		}
 	</script>
 </body>
 </html>

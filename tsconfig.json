@@ -17,6 +17,7 @@
     "src/modules/gemini/example",
     "verify-*.ts",
     "test-*.ts",
+    "tests",
     "workers",
     "**/*.test.ts",
     "src/modules/elevenlabs/test.ts",
