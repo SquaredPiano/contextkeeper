@@ -27,6 +27,10 @@ const extensionConfig = {
     'fsevents': 'commonjs fsevents',
     // modules added here also need to be added in the .vscodeignore file
   },
+  node: {
+    __dirname: false, // Use real __dirname from Node.js (not webpack's mock)
+    __filename: false, // Use real __filename from Node.js
+  },
   resolve: {
     // support reading TypeScript and JavaScript files, 📖 -> https://github.com/TypeStrong/ts-loader
     extensions: ['.ts', '.js']

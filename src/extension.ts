@@ -3,9 +3,7 @@
 import * as vscode from "vscode";
 import * as dotenv from "dotenv";
 import * as path from "path";
-
-// Load environment variables from .env.local
-dotenv.config({ path: path.resolve(__dirname, "../.env.local") });
+import * as fs from "fs";
 
 import { LintingService } from "./modules/gitlogs/LintingService";
 import { ContextIngestionService } from "./services/ingestion/ContextIngestionService";
@@ -21,6 +19,7 @@ import { GeminiService } from './services/real/GeminiService';
 import { GitService } from './services/real/GitService';
 import { ElevenLabsService } from './modules/elevenlabs/elevenlabs';
 import { LanceDBStorage } from './services/storage/storage';
+import { MockVoiceService } from './services/mock/MockVoiceService';
 // The ContextIngestionService is already imported above, so we don't duplicate it here.
 
 // Import UI components
@@ -81,6 +80,27 @@ function recordChange(description: string, action: string = 'action', actor: str
 export async function activate(context: vscode.ExtensionContext) {
   console.log('Autonomous Copilot extension is now active!');
 
+  // Load environment variables from .env.local (use extensionPath for proper path resolution)
+  try {
+    const envPath = path.join(context.extensionPath, '.env.local');
+    if (fs.existsSync(envPath)) {
+      dotenv.config({ path: envPath });
+      console.log('Loaded .env.local from extension path');
+    } else {
+      // Fallback to workspace root
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (workspaceRoot) {
+        const fallbackEnvPath = path.join(workspaceRoot, '.env.local');
+        if (fs.existsSync(fallbackEnvPath)) {
+          dotenv.config({ path: fallbackEnvPath });
+          console.log('Loaded .env.local from workspace root');
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('Failed to load .env.local:', error);
+  }
+
   try {
     const geminiService = new GeminiService();
     aiService = geminiService;
@@ -139,10 +159,13 @@ export async function activate(context: vscode.ExtensionContext) {
         voiceService = realVoiceService;
       } catch (err) {
         console.error("Failed to initialize ElevenLabs:", err);
+        // Fallback to mock service if initialization fails
+        voiceService = new MockVoiceService();
+        console.log("Fell back to Mock Voice Service");
       }
     } else {
       console.log("Using Mock Voice Service (Voice disabled or no API key)");
-
+      voiceService = new MockVoiceService();
     }
 
     // Initialize UI components
@@ -165,7 +188,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Send initial ElevenLabs voice state to the webview so UI reflects settings
   try {
-    const config = vscode.workspace.getConfiguration('copilot');
+    // Reuse the config variable declared earlier (line 89)
     // Ensure sound is enabled when the extension starts
     config.update('voice.elevenEnabled', true, true).then(() => {}, () => {});
     try {
@@ -209,6 +232,8 @@ export async function activate(context: vscode.ExtensionContext) {
       lintingService,
     );
 
+    // Note: autonomous mode is always ON; no UI toggle required
+
     // Show welcome notification
     NotificationManager.showSuccess(
       'Autonomous Copilot is ready!',
@@ -235,26 +260,50 @@ export async function activate(context: vscode.ExtensionContext) {
     // 4. Initialize Autonomous Agent
     autonomousAgent = new AutonomousAgent(gitService, geminiService, contextService);
 
-    // 5. Initialize Idle Detection Service
-    idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService); // 15 seconds for demo, pass Gemini
-    await idleService.initialize();
+    // 5. Initialize Orchestrator for idle improvements
+    const cloudflareWorkerUrl = config.get<string>('cloudflare.workerUrl') || process.env.CLOUDFLARE_WORKER_URL || '';
+    const orchestratorConfig = {
+      cloudflareWorkerUrl,
+      geminiApiKey: geminiApiKey || '',
+      analyzeAllFiles: false,
+      maxFilesToAnalyze: 10
+    };
     
-    // Wire idle detection to autonomous agent
-    idleService.onIdle(async () => {
-      console.log('ContextKeeper: Idle detected, triggering autonomous work...');
-      try {
-        // Run both linting and test generation when idle
-        await autonomousAgent.startSession('auto-lint');
-        
-        if (voiceService && voiceService.isEnabled()) {
-          voiceService.speak("I've completed autonomous work while you were away.", 'casual');
-        }
-      } catch (error) {
-        console.error('Autonomous task failed:', error);
-        vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? (error instanceof Error ? error.message : String(error)) : 'Unknown error'}`);
-      }
-    });
+    // Only initialize Orchestrator if we have required config
+    let orchestrator: any = null;
+    if (cloudflareWorkerUrl && geminiApiKey) {
+      const { Orchestrator } = await import('./modules/orchestrator/orchestrator');
+      orchestrator = new Orchestrator(orchestratorConfig);
+      await orchestrator.initialize();
+      console.log('Orchestrator initialized for idle improvements');
+    } else {
+      console.warn('Orchestrator not initialized: missing cloudflare.workerUrl or gemini.apiKey');
+    }
 
+    // 6. Initialize Idle Detection Service
+    idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService); // 15 seconds threshold
+    
+    // Wire idle service to orchestrator and autonomous agent
+    if (orchestrator && autonomousAgent) {
+      idleService.setWorkflowServices(orchestrator, autonomousAgent);
+    } else {
+      // Fallback to legacy callback if orchestrator not available
+      idleService.onIdle(async () => {
+        console.log('ContextKeeper: Idle detected, triggering legacy autonomous work...');
+        try {
+          await autonomousAgent.startSession('auto-lint');
+          
+          if (voiceService && voiceService.isEnabled()) {
+            voiceService.speak("I've completed autonomous work while you were away.", 'casual');
+          }
+        } catch (error) {
+          console.error('Autonomous task failed:', error);
+          vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? (error instanceof Error ? error.message : String(error)) : 'Unknown error'}`);
+        }
+      });
+    }
+    
+    await idleService.initialize();
     context.subscriptions.push(idleService);
 
     // Register Test Command
@@ -279,6 +328,12 @@ export async function activate(context: vscode.ExtensionContext) {
  * Set up event listeners for service events
  */
 function setupServiceListeners() {
+  // Safety check: ensure services are initialized
+  if (!contextService || !aiService) {
+    console.warn('setupServiceListeners: Services not fully initialized yet');
+    return;
+  }
+
   // Listen to context service events
   contextService.on('contextCollected', (context: DeveloperContext) => {
     currentContext = context;
@@ -327,7 +382,7 @@ function setupServiceListeners() {
     NotificationManager.showAnalysisComplete(analysis.issues.length);
 
     // Voice notification if enabled
-    if (voiceService.isEnabled()) {
+    if (voiceService && voiceService.isEnabled()) {
       const message = analysis.issues.length > 0
         ? `Found ${analysis.issues.length} issues in your code.`
         : 'No issues found. Your code looks great!';

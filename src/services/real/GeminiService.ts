@@ -19,10 +19,12 @@ export class GeminiService extends EventEmitter implements IAIService {
     }
     try {
       this.genAI = new GoogleGenerativeAI(apiKey);
-      this.model = this.genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
+      const modelName = "gemini-2.0-flash";
+      console.log(`[GeminiService] Initializing with model: ${modelName}`);
+      this.model = this.genAI.getGenerativeModel({ model: modelName });
       this.embeddingModel = this.genAI.getGenerativeModel({ model: "text-embedding-004" });
       this.isInitialized = true;
-      console.log("GeminiService initialized successfully.");
+      console.log(`[GeminiService] Initialized successfully with model: ${modelName}`);
     } catch (error) {
       console.error("Failed to initialize GeminiService:", error);
     }
@@ -105,13 +107,14 @@ export class GeminiService extends EventEmitter implements IAIService {
   async fixError(code: string, error: string): Promise<CodeFix> {
     if (!this.isInitialized || !this.model) { throw new Error("GeminiService not initialized"); }
 
-    const prompt = `Fix the following error in the code:\nError: ${error}\n\nCode:\n${code}\n\nReturn only the fixed code.`;
+    const prompt = `Analyze the following error in the code and provide guidance on how to fix it. DO NOT generate or provide fixed code - only explain what's wrong and how to fix it.\n\nError: ${error}\n\nCode:\n${code}\n\nProvide a detailed explanation without any code examples.`;
     const result = await this.model.generateContent(prompt);
-    const fixedCode = result.response.text().replace(/```typescript/g, '').replace(/```/g, '').trim();
+    const explanation = result.response.text().trim();
 
+    // Always return original code unchanged - only provide suggestions
     return {
-      fixedCode: fixedCode,
-      explanation: "Fixed by Gemini",
+      fixedCode: code, // Return original code - no implementation
+      explanation: explanation || "Error analysis completed. Please review and apply fixes manually.",
       diff: ""
     };
   }

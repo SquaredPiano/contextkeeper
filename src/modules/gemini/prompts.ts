@@ -99,7 +99,12 @@ INSTRUCTIONS:
 For EACH file provided above, perform the following:
 1.  **Analyze**: Find bugs, logic errors, and code smells.
 2.  **Generate Tests**: Create a comprehensive unit test suite (Vitest) for the file.
-3.  **Suggest Fixes**: For any "error" or "high" severity issue found, provide a corrected code snippet.
+3.  **Suggest Fixes**: For any "error" or "high" severity issue found, provide detailed explanations on how to fix them.
+
+IMPORTANT CONSTRAINTS:
+1. DO NOT generate fixed code, patches, diffs, or code modifications.
+2. DO NOT include code snippets in suggestedFixes.
+3. ONLY provide explanations and guidance - let the developer implement the fixes.
 
 Respond in valid JSON format ONLY with this structure:
 {
@@ -114,21 +119,18 @@ Respond in valid JSON format ONLY with this structure:
         "summary": "File specific summary"
       },
       "generatedTests": "string (full test file content)",
-      "suggestedFixes": [
-        {
-          "issueId": "issue-index (0, 1, etc)",
-          "fix": { "fixedCode": "string", "confidence": number, "explanation": "string" }
-        }
-      ]
+      "suggestedFixes": []
     }
   ]
 }
+
+NOTE: The suggestedFixes array should be empty or omitted. All fix guidance should be in the analysis.issues[].message and analysis.suggestions fields instead.
     `.trim();
   }
   
   static errorFix(code: string, error: string): string {
     return `
-Fix the following error in the code.
+Analyze the following error in the code. Provide suggestions on how to fix it, but DO NOT generate or provide fixed code.
 
 Error:
 ${error}
@@ -138,14 +140,91 @@ Code:
 ${code}
 \`\`\`
 
+IMPORTANT CONSTRAINTS:
+1. DO NOT generate or provide fixed code, patches, diffs, or code modifications.
+2. DO NOT include code snippets, code examples, or code blocks in your response.
+3. ONLY provide a detailed explanation of what's wrong and how to fix it.
+
 INSTRUCTIONS:
-Analyze the error and the code. Provide a corrected version of the code.
+Analyze the error and the code. Explain what's causing the error and provide clear, actionable guidance on how to fix it. Your explanation should be detailed enough that a developer can make the fix themselves, but MUST NOT include any actual code.
+
 Respond in valid JSON format ONLY:
 {
-  "fixedCode": "string (the complete fixed code)",
-  "confidence": number (0.0 to 1.0),
-  "explanation": "string (brief explanation of the fix)"
+  "fixedCode": "REPLACE_WITH_ORIGINAL_CODE_AS_IS",
+  "confidence": number (0.0 to 1.0, based on your confidence in the diagnosis),
+  "explanation": "string (detailed explanation of what's wrong and how to fix it, WITHOUT any code examples or code blocks)"
 }
+
+CRITICAL: In the "fixedCode" field, you MUST return the exact original code that was provided above, unchanged. Do NOT modify it. The explanation field should contain all guidance on how to fix the issue.
+    `.trim();
+  }
+
+  /**
+   * Prompt for idle improvements workflow.
+   * Generates tests, summary, and recommendations ONLY.
+   * MUST NOT generate code patches or fixes.
+   */
+  static idleImprovements(context: GeminiContext): string {
+    const relatedFilesStr = context.relatedFiles.length > 0 
+      ? context.relatedFiles.join(", ") 
+      : "None";
+    
+    const commitsStr = context.recentCommits.length > 0
+      ? context.recentCommits.slice(0, 5).join("\n- ")
+      : "None";
+
+    const pastSessionsStr = context.relevantPastSessions && context.relevantPastSessions.length > 0
+      ? context.relevantPastSessions.map(s => 
+          `- ${new Date(s.timestamp).toLocaleDateString()}: ${s.summary}`
+        ).join("\n")
+      : "None";
+
+    return `
+You are an expert AI coding assistant analyzing a developer's codebase during an idle period.
+
+CONTEXT:
+- Active File: ${context.activeFile || "Unknown"}
+- Related Open Files: ${relatedFilesStr}
+- Recent Git Commits:
+${commitsStr}
+- Edit Count: ${context.editCount} edits in this session
+- Git Diff Summary: ${context.gitDiffSummary || "No uncommitted changes"}
+- Relevant Past Sessions (from Vector DB):
+${pastSessionsStr}
+- User Intent: ${context.userIntent || "General code improvements"}
+
+IMPORTANT CONSTRAINTS:
+1. DO NOT generate code patches, diffs, or fixed code.
+2. DO NOT provide AST edits or code modifications.
+3. DO NOT suggest automatic fixes or apply changes.
+4. ONLY generate: test cases, human-readable summaries, and priority recommendations.
+
+YOUR TASK:
+Based on the current codebase state and historical context:
+1. Generate comprehensive test cases for key files (as full test file content)
+2. Create a human-readable summary of the current work state and potential improvements
+3. Provide priority-based recommendations (high/medium/low) for improvements
+
+Respond in valid JSON format ONLY:
+{
+  "summary": "Human-readable summary of the current codebase state, what the developer has been working on, and areas that could benefit from attention. This should be friendly and actionable.",
+  "tests": [
+    "// Full test file content as string (e.g., describe('...', () => { ... })",
+    "// Another test file content"
+  ],
+  "recommendations": [
+    {
+      "priority": "high" | "medium" | "low",
+      "message": "Clear, actionable recommendation message (e.g., 'Consider adding error handling for edge cases in UserService')"
+    }
+  ]
+}
+
+REMEMBER:
+- Tests should be complete, runnable test files
+- Summary should be friendly and informative
+- Recommendations should be actionable but NOT include code fixes
+- NO patches, diffs, or code modifications
     `.trim();
   }
 }

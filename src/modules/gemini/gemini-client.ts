@@ -5,14 +5,15 @@ import { parseJsonFromText } from './utils';
 
 export class GeminiClient implements GeminiModule {
   private apiKey: string = "";
-  private modelName: string = "gemini-2.5-flash";
+  private modelName: string = "gemini-2.0-flash";
   private genAI: GoogleGenerativeAI | null = null;
   private model: GenerativeModel | null = null;
   private ready = false;
   private lastRequestTime = 0;
-  private minRequestInterval = 2000; // 2 seconds between requests to be safe
+  private minRequestInterval = 5000; // 5 seconds between requests to be safe
 
-  async initialize(apiKey: string, modelName: string = "gemini-2.5-flash"): Promise<void> {
+  async initialize(apiKey: string, modelName: string = "gemini-2.0-flash"): Promise<void> {
+    console.log(`[GeminiClient] Initializing with model: ${modelName}`);
     this.apiKey = apiKey;
     
     // If already in mock mode, don't create real client
@@ -23,7 +24,9 @@ export class GeminiClient implements GeminiModule {
     
     this.modelName = modelName;
     this.genAI = new GoogleGenerativeAI(this.apiKey);
+    console.log(`[GeminiClient] Creating model instance with name: ${this.modelName}`);
     this.model = this.genAI.getGenerativeModel({ model: this.modelName });
+    console.log(`[GeminiClient] Model initialized successfully`);
     this.ready = true;
   }
 
@@ -193,9 +196,9 @@ describe('generatedTest', () => {
 
     if (this.modelName === "mock") {
       return {
-        fixedCode: code + "\n// Fixed by mock",
+        fixedCode: code, // Return original code unchanged
         confidence: 0.9,
-        explanation: "Mock fix applied"
+        explanation: "Mock analysis: Error identified. Please review the code and apply fixes manually."
       };
     }
 
@@ -208,15 +211,92 @@ describe('generatedTest', () => {
       const text = response.text();
       
       const fallback: CodeFix = {
-        fixedCode: code,
+        fixedCode: code, // Return original code unchanged - no implementation
         confidence: 0,
-        explanation: "Failed to parse fix response"
+        explanation: "Failed to parse fix response. Please review the error manually."
       };
 
-      return parseJsonFromText<CodeFix>(text, fallback);
+      const parsed = parseJsonFromText<CodeFix>(text, fallback);
+      
+      // Always return original code to prevent any implementation
+      // Only provide suggestions in explanation
+      return {
+        fixedCode: code, // Never return modified code
+        confidence: parsed.confidence || 0,
+        explanation: parsed.explanation || "Analysis completed. Please review and apply fixes manually."
+      };
     } catch (error) {
       console.error("Gemini error fix failed:", error);
+      // Return original code unchanged on error
+      return {
+        fixedCode: code,
+        confidence: 0,
+        explanation: "Error analysis failed. Please review the error manually."
+      };
+    }
+  }
+
+  /**
+   * Generate idle improvements: tests, summary, and recommendations (NO code patches)
+   */
+  async generateIdleImprovements(context: GeminiContext): Promise<import("../idle-detector/idle-service").IdleImprovementsResult> {
+    if (!this.ready) {
+      throw new Error("GeminiClient not initialized");
+    }
+
+    await this.rateLimit();
+
+    if (this.modelName === "mock") {
+      return {
+        summary: "Mock idle improvements analysis completed. Found potential areas for improvement.",
+        tests: ["// Mock test file 1", "// Mock test file 2"],
+        recommendations: [
+          { priority: "medium" as const, message: "Mock recommendation: Consider adding error handling" },
+          { priority: "low" as const, message: "Mock recommendation: Add more comments for clarity" }
+        ]
+      };
+    }
+
+    const prompt = PromptTemplates.idleImprovements(context);
+
+    try {
+      if (!this.model) { throw new Error("Model not initialized"); }
+      const result = await this.model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+      
+      return this.parseIdleImprovements(text);
+    } catch (error) {
+      console.error("Gemini idle improvements generation failed:", error);
       throw error;
+    }
+  }
+
+  private parseIdleImprovements(text: string): import("../idle-detector/idle-service").IdleImprovementsResult {
+    const fallback: import("../idle-detector/idle-service").IdleImprovementsResult = {
+      summary: "Analysis completed. No specific improvements identified at this time.",
+      tests: [],
+      recommendations: []
+    };
+
+    try {
+      const parsed = parseJsonFromText<any>(text, fallback);
+      
+      return {
+        summary: parsed.summary || fallback.summary,
+        tests: Array.isArray(parsed.tests) ? parsed.tests : fallback.tests,
+        recommendations: Array.isArray(parsed.recommendations) 
+          ? parsed.recommendations.filter((r: any) => 
+              r && r.priority && ['high', 'medium', 'low'].includes(r.priority) && r.message
+            ).map((r: any) => ({
+              priority: r.priority as 'high' | 'medium' | 'low',
+              message: r.message || ''
+            }))
+          : fallback.recommendations
+      };
+    } catch (error) {
+      console.error("Failed to parse idle improvements response:", error);
+      return fallback;
     }
   }
 }

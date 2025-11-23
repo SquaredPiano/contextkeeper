@@ -50,6 +50,11 @@ export class ElevenLabsService implements IVoiceService {
       return;
     }
 
+    // Map voiceStyle to VoiceType
+    const voice: VoiceType = (voiceStyle === 'casual' ? 'casual' : 
+                              voiceStyle === 'encouraging' ? 'encouraging' : 
+                              'professional') as VoiceType;
+
     try {
       const voice: VoiceType = voiceStyle || 'casual';
       await this.performSpeak(text, voice);
@@ -130,6 +135,10 @@ export class ElevenLabsService implements IVoiceService {
           console.error('Failed to delete temp audio file:', err);
         }
       }
+      // Clean up file after playing (regardless of success/failure)
+      fs.unlink(filePath).catch((err) => {
+        console.error('Failed to delete temp audio file:', err);
+      });
     });
   }
 }
