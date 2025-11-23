@@ -59,7 +59,7 @@ export function initializeMockVSCode(workspaceRoot: string, activeFile?: string)
       if (fs.existsSync(fullPath)) {
         mockActiveFileContent = fs.readFileSync(fullPath, 'utf-8');
       }
-    } catch (e) {
+    } catch {
       // Ignore errors
     }
   }
@@ -81,16 +81,22 @@ export function createMockVSCode(): MockVSCode {
     const excludeDirs = ['node_modules', '.git', 'dist', 'out', 'build', 'coverage'];
     
     function findFile(dir: string, depth: number = 0): string | undefined {
-      if (depth > 3) return undefined; // Limit depth
+      if (depth > 3) {
+        return undefined; // Limit depth
+      }
       
       try {
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         
         for (const entry of entries) {
           if (entry.isDirectory()) {
-            if (excludeDirs.includes(entry.name)) continue;
+            if (excludeDirs.includes(entry.name)) {
+              continue;
+            }
             const found = findFile(path.join(dir, entry.name), depth + 1);
-            if (found) return found;
+            if (found) {
+              return found;
+            }
           } else if (entry.isFile()) {
             const ext = path.extname(entry.name);
             if (extensions.includes(ext)) {
@@ -98,7 +104,7 @@ export function createMockVSCode(): MockVSCode {
             }
           }
         }
-      } catch (e) {
+      } catch {
         // Ignore errors
       }
       return undefined;
@@ -109,7 +115,7 @@ export function createMockVSCode(): MockVSCode {
       activeFile = found;
       try {
         activeFileContent = fs.readFileSync(activeFile, 'utf-8');
-      } catch (e) {
+      } catch {
         // Ignore
       }
     }
@@ -185,7 +191,9 @@ export function createMockVSCode(): MockVSCode {
           if (excludeMatch) {
             excludeMatch[1].split(',').forEach(p => {
               const dir = p.trim().replace(/\*\*/g, '').replace(/\//g, '').replace(/\*/g, '');
-              if (dir) excludeDirs.add(dir);
+              if (dir) {
+                excludeDirs.add(dir);
+              }
             });
           }
           // Add defaults
@@ -199,7 +207,9 @@ export function createMockVSCode(): MockVSCode {
           const files: string[] = [];
 
           function scanDir(dir: string, depth: number = 0) {
-            if (depth > 10) return; // Limit depth
+            if (depth > 10) {
+              return; // Limit depth
+            }
             
             try {
               const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -223,7 +233,7 @@ export function createMockVSCode(): MockVSCode {
                   }
                 }
               }
-            } catch (e) {
+            } catch {
               // Ignore permission errors
             }
           }

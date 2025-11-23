@@ -4,6 +4,8 @@ import { IIdleService, IdleConfig } from './types';
 import { IStorageService } from '../../services/interfaces';
 import { EventRecord } from '../../services/storage/schema';
 import { IAIService } from '../../services/interfaces';
+import type { Orchestrator } from '../orchestrator/orchestrator';
+import type { AutonomousAgent } from '../autonomous/AutonomousAgent';
 
 // Hardcoded idle threshold: 15 seconds exactly
 const DEFAULT_IDLE_THRESHOLD_MS = 15000;
@@ -24,6 +26,7 @@ export class IdleService implements IIdleService {
     private aiService: IAIService | null = null;
     private workDoneWhileIdle: string[] = [];
     private isHandlingIdle: boolean = false; // Prevent duplicate handling
+    private uiUpdateCallback?: (result: IdleImprovementsResult) => void; // NEW: Callback for UI updates
 
     constructor(storage: IStorageService, config: IdleConfig = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, aiService?: IAIService) {
         this.detector = new IdleDetector(config);
@@ -51,14 +54,21 @@ export class IdleService implements IIdleService {
         this.onIdleCallback = callback;
     }
 
+    /**
+     * Register a callback for UI updates when idle improvements complete
+     */
+    public onIdleImprovementsComplete(callback: (result: IdleImprovementsResult) => void): void {
+        this.uiUpdateCallback = callback;
+    }
+
     // Store references to orchestrator and autonomous agent
-    private orchestrator: any = null;
-    private autonomousAgent: any = null;
+    private orchestrator: Orchestrator | null = null;
+    private autonomousAgent: AutonomousAgent | null = null;
 
     /**
      * Set the orchestrator and autonomous agent for idle improvements workflow
      */
-    setWorkflowServices(orchestrator: any, autonomousAgent: any): void {
+    setWorkflowServices(orchestrator: Orchestrator, autonomousAgent: AutonomousAgent): void {
         this.orchestrator = orchestrator;
         this.autonomousAgent = autonomousAgent;
     }
@@ -104,8 +114,8 @@ export class IdleService implements IIdleService {
      * Orchestrates the sequence but performs no work itself.
      */
     async handleIdleImprovements(
-        orchestrator: any, // Orchestrator instance
-        autonomousAgent: any // AutonomousAgent instance
+        orchestrator: Orchestrator, // Orchestrator instance
+        autonomousAgent: AutonomousAgent // AutonomousAgent instance
     ): Promise<IdleImprovementsResult | null> {
         if (this.isHandlingIdle) {
             console.log('[IdleService] Already handling idle improvements');
@@ -131,6 +141,11 @@ export class IdleService implements IIdleService {
             // Step 4: Display results to user
             if (result) {
                 this.displayIdleResults(result);
+                
+                // NEW: Send to UI via callback
+                if (this.uiUpdateCallback) {
+                    this.uiUpdateCallback(result);
+                }
             }
 
             return result || null;
@@ -158,6 +173,15 @@ export class IdleService implements IIdleService {
             ``,
             result.tests.length > 0 ? `✅ Generated ${result.tests.length} test file(s)` : ''
         ].filter(Boolean).join('\n');
+
+        // Track work done while idle for display when user returns
+        this.workDoneWhileIdle.push(`🔍 Analysis: ${result.summary}`);
+        if (result.tests.length > 0) {
+            this.workDoneWhileIdle.push(`✅ Generated ${result.tests.length} test file(s)`);
+        }
+        result.recommendations.slice(0, 3).forEach(rec => {
+            this.workDoneWhileIdle.push(`💡 [${rec.priority.toUpperCase()}] ${rec.message}`);
+        });
 
         // Show notification without blocking
         vscode.window.showInformationMessage(

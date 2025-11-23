@@ -204,7 +204,7 @@ export interface StorageEvent {
 }
 
 export interface IStorageService {
-	connect(embeddingService?: any): Promise<void>;
+	connect(embeddingService?: IEmbeddingService): Promise<void>;
 	logEvent(event: Omit<EventRecord, 'id'>): Promise<void>;
 	createSession(summary: string, project: string): Promise<SessionRecord>;
 	addAction(action: Omit<ActionRecord, 'id' | 'embedding'>): Promise<void>;
@@ -256,7 +256,14 @@ export type ExtensionToUIMessage =
 	| { type: 'analysisComplete'; payload: AIAnalysis }
 	| { type: 'stateChanged'; state: ExtensionState }
 	| { type: 'progress'; progress: number; message: string }
-	| { type: 'error'; message: string };
+	| { type: 'error'; message: string }
+	| { type: 'idleImprovementsComplete'; payload: { 
+			summary: string; 
+			testsGenerated: number; 
+			recommendations: Array<{ priority: 'high' | 'medium' | 'low'; message: string }>; 
+			timestamp: number;
+		}
+	};
 
 export type ExtensionState =
 	| { status: 'idle' }

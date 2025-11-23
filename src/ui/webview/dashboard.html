@@ -280,6 +280,7 @@
 				case 'contextUpdate': updateContext(msg.payload); break;
 				case 'analysisComplete': updateAnalysis(msg.payload); break;
 				case 'extensionChanges': updateExtensionChanges(msg.payload); break;
+				case 'idleImprovementsComplete': updateIdleImprovements(msg.payload); break;
 				case 'notificationsState':
 					try { localStorage.setItem(NOTIF_KEY, String(Boolean(msg.enabled))); } catch (e) {}
 					setNotifUI(Boolean(msg.enabled));
@@ -350,6 +351,61 @@
 				const who = c.actor ? `<span style="color:var(--vscode-descriptionForeground); font-size:11px; margin-right:6px">${c.actor}</span>` : '';
 				return `<div class=\"issue-item\">${who}<strong>${what}</strong><div class=\"small-muted\">${time}</div></div>`;
 			}).join('');
+		}
+
+		function updateIdleImprovements(payload){
+			// Display "While you were away" summary
+			if (!payload) return;
+			
+			const summary = payload.summary || 'Completed idle analysis';
+			const testsCount = payload.testsGenerated || 0;
+			const recommendations = payload.recommendations || [];
+			const timestamp = payload.timestamp ? new Date(payload.timestamp).toLocaleString() : '';
+			
+			// Update analysis summary with idle improvements
+			const summaryEl = document.getElementById('analysisSummary');
+			if (summaryEl) {
+				summaryEl.textContent = `🎯 While you were away: ${summary}`;
+			}
+			
+			// Add to extension changes
+			const changes = [];
+			changes.push({
+				time: payload.timestamp || Date.now(),
+				description: `Idle Analysis: ${summary}`,
+				actor: 'autonomous',
+				action: 'idle-analysis'
+			});
+			
+			if (testsCount > 0) {
+				changes.push({
+					time: payload.timestamp || Date.now(),
+					description: `Generated ${testsCount} test file(s)`,
+					actor: 'autonomous',
+					action: 'test-generation'
+				});
+			}
+			
+			recommendations.slice(0, 5).forEach(rec => {
+				changes.push({
+					time: payload.timestamp || Date.now(),
+					description: `[${rec.priority.toUpperCase()}] ${rec.message}`,
+					actor: 'autonomous',
+					action: 'recommendation'
+				});
+			});
+			
+			// Prepend to existing changes
+			const existingChanges = JSON.parse(localStorage.getItem('extensionChanges') || '[]');
+			const merged = [...changes, ...existingChanges].slice(0, 100);
+			try {
+				localStorage.setItem('extensionChanges', JSON.stringify(merged));
+			} catch (e) {}
+			
+			updateExtensionChanges(merged);
+			
+			// Show welcome back notification (visual only, no popup)
+			console.log('[Dashboard] Idle improvements displayed:', summary, 'Tests:', testsCount, 'Recommendations:', recommendations.length);
 		}
 
 		// Request initial context and ensure sound is enabled by default via extension

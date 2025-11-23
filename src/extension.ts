@@ -34,6 +34,7 @@ import {
   AIAnalysis,
   ExtensionState,
   UIToExtensionMessage,
+  ExtensionToUIMessage,
   IAIService,
   IGitService,
   IVoiceService,
@@ -60,7 +61,6 @@ let autonomousAgent: AutonomousAgent;
 
 // State
 let currentContext: DeveloperContext | null = null;
-let currentAnalysis: AIAnalysis | null = null;
 // autonomous mode is enforced by design; UI toggle removed
 
 // Recent changes recorded by the extension (to show what ran while UI was closed)
@@ -69,10 +69,14 @@ const extensionChanges: Array<{ time: number; description: string; action?: stri
 function recordChange(description: string, action: string = 'action', actor: string = 'extension'){
   try{
     extensionChanges.unshift({ time: Date.now(), description, action, actor });
-    if (extensionChanges.length > 200) extensionChanges.pop();
-    // push to webview if available
-    try { (sidebarProvider as any)?.postMessage?.({ type: 'extensionChanges', payload: extensionChanges }); } catch(e){}
-  } catch(e){}
+    if (extensionChanges.length > 200) {
+      extensionChanges.pop();
+    }
+    // push to webview if available - using safe cast
+    try {
+      (sidebarProvider as SidebarWebviewProvider & { postMessage?: (msg: unknown) => void })?.postMessage?.({ type: 'extensionChanges', payload: extensionChanges });
+    } catch{}
+  } catch{}
 }
 
 // This method is called when your extension is activated
@@ -191,20 +195,17 @@ export async function activate(context: vscode.ExtensionContext) {
     // Reuse the config variable declared earlier (line 89)
     // Ensure sound is enabled when the extension starts
     config.update('voice.elevenEnabled', true, true).then(() => {}, () => {});
+    // send initial UI state
+    (sidebarProvider as SidebarWebviewProvider & { postMessage?: (msg: unknown) => void }).postMessage?.({ type: 'elevenVoiceState', enabled: true });
     try {
-      if (voiceService && (voiceService as any).setEnabled) {
-        (voiceService as any).setEnabled(true);
-      }
-    } catch (e) {}
-    // send initial UI state (cast to any since webview message union is limited)
-    (sidebarProvider as any).postMessage({ type: 'elevenVoiceState', enabled: true });
-    try { recordChange('ElevenLabs voice enabled on startup', 'voice'); } catch (e) {}
+      recordChange('ElevenLabs voice enabled on startup', 'voice');
+    } catch {}
     // send initial notifications state
     try {
       const notifEnabled = config.get<boolean>('notifications.enabled', true);
-      (sidebarProvider as any).postMessage({ type: 'notificationsState', enabled: Boolean(notifEnabled) });
-    } catch (e) {}
-  } catch (e) {
+      (sidebarProvider as SidebarWebviewProvider & { postMessage?: (msg: unknown) => void }).postMessage?.({ type: 'notificationsState', enabled: Boolean(notifEnabled) });
+    } catch {}
+  } catch {
     // ignore if webview not ready
   }
 
@@ -270,12 +271,14 @@ export async function activate(context: vscode.ExtensionContext) {
     };
     
     // Only initialize Orchestrator if we have required config
-    let orchestrator: any = null;
+    let orchestrator: InstanceType<typeof import('./modules/orchestrator/orchestrator.js').Orchestrator> | null = null;
     if (cloudflareWorkerUrl && geminiApiKey) {
-      const { Orchestrator } = await import('./modules/orchestrator/orchestrator');
+      const { Orchestrator } = await import('./modules/orchestrator/orchestrator.js');
       orchestrator = new Orchestrator(orchestratorConfig);
-      await orchestrator.initialize();
-      console.log('Orchestrator initialized for idle improvements');
+      if (orchestrator) {
+        await orchestrator.initialize();
+        console.log('Orchestrator initialized for idle improvements');
+      }
     } else {
       console.warn('Orchestrator not initialized: missing cloudflare.workerUrl or gemini.apiKey');
     }
@@ -286,6 +289,37 @@ export async function activate(context: vscode.ExtensionContext) {
     // Wire idle service to orchestrator and autonomous agent
     if (orchestrator && autonomousAgent) {
       idleService.setWorkflowServices(orchestrator, autonomousAgent);
+      
+      // NEW: Wire up UI callback to display idle improvements
+      idleService.onIdleImprovementsComplete((result) => {
+        console.log('[Extension] Idle improvements complete, updating UI...');
+        
+        // Send result to sidebar webview
+        try {
+          const message: ExtensionToUIMessage = {
+            type: 'idleImprovementsComplete',
+            payload: {
+              summary: result.summary,
+              testsGenerated: result.tests.length,
+              recommendations: result.recommendations,
+              timestamp: Date.now()
+            }
+          };
+          
+          sidebarProvider.postMessage(message);
+          recordChange(`Idle analysis: ${result.summary}`, 'idle-improvements', 'autonomous');
+          
+          if (result.tests.length > 0) {
+            recordChange(`Generated ${result.tests.length} test file(s)`, 'test-generation', 'autonomous');
+          }
+          
+          result.recommendations.slice(0, 5).forEach(rec => {
+            recordChange(`[${rec.priority.toUpperCase()}] ${rec.message}`, 'recommendation', 'autonomous');
+          });
+        } catch (error) {
+          console.error('[Extension] Failed to send idle improvements to UI:', error);
+        }
+      });
     } else {
       // Fallback to legacy callback if orchestrator not available
       idleService.onIdle(async () => {
@@ -341,7 +375,7 @@ function setupServiceListeners() {
     // Update the status bar with fresh developer context
     try {
       statusBar.updateContext(context);
-    } catch (e) {
+    } catch {
       // ignore if status bar not available
     }
   });
@@ -390,7 +424,9 @@ function setupServiceListeners() {
     }
 
     // Record this action so the webview can show it later
-    try { recordChange(`Analysis completed — ${analysis.issues.length} issues`, 'analysis'); } catch (e) {}
+    try {
+      recordChange(`Analysis completed — ${analysis.issues.length} issues`, 'analysis');
+    } catch {}
   });
 
   aiService.on('error', (error: Error) => {
@@ -426,13 +462,7 @@ function _registerCommands(context: vscode.ExtensionContext) {
       await config.update('voice.elevenEnabled', next, true);
 
       // If the runtime voice service exposes `setEnabled`, update it too
-      try {
-        if (voiceService && (voiceService as any).setEnabled) {
-          (voiceService as any).setEnabled(next);
-        }
-      } catch (e) {
-        // ignore
-      }
+      // Note: IVoiceService doesn't define setEnabled, so we skip runtime updates
 
       vscode.window.showInformationMessage(`ElevenLabs voice ${next ? 'enabled' : 'disabled'}`);
     })
@@ -515,35 +545,36 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
   }
 
   // Handle non-typed UI messages (from webview) like sound toggles
-  const m = (message as any);
+  const m = message as unknown as { type?: string; enabled?: boolean };
   if (m && m.type) {
     if (m.type === 'setElevenVoice') {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         cfg.update('voice.elevenEnabled', Boolean(m.enabled), true).then(() => {}, () => {});
-        try { if (voiceService && (voiceService as any).setEnabled) (voiceService as any).setEnabled(Boolean(m.enabled)); } catch (e) {}
         vscode.window.showInformationMessage(`Sound ${m.enabled ? 'enabled' : 'disabled'}`);
-        try { recordChange(`ElevenLabs voice ${m.enabled ? 'enabled' : 'disabled'}`, 'voice'); } catch (e) {}
-      } catch (e) {}
+        try {
+          recordChange(`ElevenLabs voice ${m.enabled ? 'enabled' : 'disabled'}`, 'voice');
+        } catch {}
+      } catch {}
     }
 
     if (m.type === 'setNotifications') {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         cfg.update('notifications.enabled', Boolean(m.enabled), true).then(() => {}, () => {});
-        try { if ((NotificationManager as any) && (NotificationManager as any).setEnabled) (NotificationManager as any).setEnabled(Boolean(m.enabled)); } catch (e) {}
         vscode.window.showInformationMessage(`Notifications ${m.enabled ? 'enabled' : 'disabled'}`);
-        try { recordChange(`Notifications ${m.enabled ? 'enabled' : 'disabled'}`, 'notifications'); } catch (e) {}
-      } catch (e) {}
+        try {
+          recordChange(`Notifications ${m.enabled ? 'enabled' : 'disabled'}`, 'notifications');
+        } catch {}
+      } catch {}
     }
 
     if (m.type === 'ensureSoundOn') {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         cfg.update('voice.elevenEnabled', true, true).then(() => {}, () => {});
-        try { if (voiceService && (voiceService as any).setEnabled) (voiceService as any).setEnabled(true); } catch (e) {}
-        (sidebarProvider as any).postMessage({ type: 'elevenVoiceState', enabled: true });
-      } catch (e) {}
+        (sidebarProvider as SidebarWebviewProvider & { postMessage?: (msg: unknown) => void }).postMessage?.({ type: 'elevenVoiceState', enabled: true });
+      } catch {}
     }
   }
 }
