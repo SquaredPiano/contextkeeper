@@ -688,6 +688,13 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       }
       break;
 
+    case 'clearIdleSummary':
+      // Clear the persisted idle summary from storage
+      console.log('[Extension] Clearing idle summary from storage');
+      // The UI already cleared localStorage, no further action needed
+      vscode.window.showInformationMessage('Context summary cleared');
+      break;
+
     case 'ensureSoundOn':
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');

@@ -315,6 +315,24 @@ export class IdleService implements IIdleService {
                         // Don't fail the workflow, just log the error
                     }
                 }
+                
+                // CRITICAL: Also save to a persistent special action so it loads on next session
+                try {
+                    await this.storage.addAction({
+                        session_id: this.sessionManager?.getSessionId() || 'unknown',
+                        timestamp: Date.now(),
+                        description: result.summary,
+                        code_context: JSON.stringify({
+                            tests: result.tests,
+                            recommendations: result.recommendations,
+                            sessionId: this.sessionManager?.getSessionId()
+                        }),
+                        files: '[]'
+                    });
+                    console.log('[IdleService] ✅ Idle summary saved as action for persistence');
+                } catch (error) {
+                    console.error('[IdleService] Failed to save idle summary action:', error);
+                }
             }
             
             console.log('[IdleService] ========== Idle improvements workflow COMPLETE ==========');
@@ -383,16 +401,23 @@ export class IdleService implements IIdleService {
             this.isHandlingIdle = false;
         }
         
-        // Speak the summary via TTS
-        if (this.voiceService && this.lastIdleSummary) {
+        // Speak the summary via TTS - Load from storage if not in memory
+        const summaryToSpeak = this.lastIdleSummary;
+        if (this.voiceService && summaryToSpeak) {
+            console.log('[IdleService] 🔊 Speaking context summary via TTS');
             try {
                 this.voiceService.speak(
-                    `Welcome back! While you were away: ${this.lastIdleSummary}`,
+                    `Welcome back! While you were away: ${summaryToSpeak}`,
                     'casual'
                 );
             } catch (error) {
                 console.warn('[IdleService] TTS failed:', error);
             }
+        } else {
+            console.log('[IdleService] No summary to speak:', {
+                hasVoiceService: !!this.voiceService,
+                hasSummary: !!summaryToSpeak
+            });
         }
         
         // Show work completed notification

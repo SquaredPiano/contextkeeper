@@ -868,7 +868,13 @@
 			</div>
 
 		<div class="info-item summary-item">
-			<div class="info-label">Summary</div>
+			<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+				<div class="info-label" style="margin-bottom: 0;">Summary</div>
+				<button id="clearSummaryBtn" class="refresh-btn" style="height: 24px; padding: 0 8px; font-size: 10px;" title="Clear context summary">
+					<span class="refresh-icon">🗑️</span>
+					<span class="refresh-text">Clear</span>
+				</button>
+			</div>
 			<div class="info-value muted" id="analysisSummary">No summary yet.</div>
 			</div>
 
@@ -1023,6 +1029,25 @@
 		el.refreshContextBtn.addEventListener('click', () => {
 			vscode.postMessage({ type: 'requestContext' });
 		});
+
+		// Clear summary button
+		const clearSummaryBtn = document.getElementById('clearSummaryBtn');
+		if (clearSummaryBtn) {
+			clearSummaryBtn.addEventListener('click', () => {
+				const summaryEl = document.getElementById('analysisSummary');
+				if (summaryEl) {
+					summaryEl.textContent = 'No summary yet.';
+				}
+				try {
+					localStorage.removeItem('lastIdleSummary');
+					localStorage.removeItem('extensionChanges');
+					console.log('[Dashboard] Cleared context summary and changes');
+				} catch (e) {
+					console.error('[Dashboard] Failed to clear localStorage:', e);
+				}
+				vscode.postMessage({ type: 'clearIdleSummary' });
+			});
+		}
 
 		// Sound toggle
 		const SOUND_KEY = 'elevenVoiceEnabled';
@@ -1298,6 +1323,13 @@
 			const testsCount = payload.testsGenerated || 0;
 			const recommendations = payload.recommendations || [];
 			
+			// Save to localStorage for persistence
+			try {
+				localStorage.setItem('lastIdleSummary', summary);
+			} catch (e) {
+				console.error('[Dashboard] Failed to save idle summary:', e);
+			}
+			
 			const summaryEl = document.getElementById('analysisSummary');
 			if (summaryEl) {
 				summaryEl.textContent = `While you were away: ${summary}`;
@@ -1393,6 +1425,20 @@
 			}
 		});
 
+
+		// Load persisted idle summary from localStorage
+		try {
+			const lastSummary = localStorage.getItem('lastIdleSummary');
+			if (lastSummary) {
+				const summaryEl = document.getElementById('analysisSummary');
+				if (summaryEl) {
+					summaryEl.textContent = `While you were away: ${lastSummary}`;
+					console.log('[Dashboard] Loaded persisted idle summary');
+				}
+			}
+		} catch (e) {
+			console.error('[Dashboard] Failed to load idle summary:', e);
+		}
 
 		// Request initial data
 		vscode.postMessage({ type: 'requestContext' });

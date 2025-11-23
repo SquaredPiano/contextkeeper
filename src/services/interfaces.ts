@@ -277,6 +277,7 @@ export type UIToExtensionMessage =
 	| { type: 'setElevenVoice'; enabled: boolean }
 	| { type: 'setNotifications'; enabled: boolean }
 	| { type: 'ensureSoundOn' }
+	| { type: 'clearIdleSummary' }
 	| { type: 'requestCopilotBranches' }
 	| { type: 'checkoutCopilotBranch'; branchName: string }
 	| { type: 'mergeCopilotBranch'; branchName: string }
