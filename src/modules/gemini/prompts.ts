@@ -60,16 +60,66 @@ Respond in valid JSON format ONLY:
     `.trim();
   }
   
-  static testGeneration(functionCode: string): string {
-    return `
-Generate comprehensive unit tests for the following function using Vitest.
-Include imports, describe blocks, and it blocks covering happy paths and edge cases.
+  static testGeneration(functionCode: string, language: string = 'typescript', framework?: string): string {
+    // Auto-detect testing framework based on language if not provided
+    const testingFramework = framework || this.getDefaultFramework(language);
+    
+    // Language-specific test templates
+    const languageInstructions: Record<string, string> = {
+      'typescript': `Generate comprehensive unit tests using ${testingFramework}.
+Include proper TypeScript type annotations.
+Use describe() and it() blocks for test organization.
+Import syntax: import { describe, it, expect } from '${testingFramework === 'Vitest' ? 'vitest' : '@jest/globals'}';`,
+      
+      'javascript': `Generate comprehensive unit tests using ${testingFramework}.
+Use describe() and it() blocks for test organization.
+Import syntax: const { describe, it, expect } = require('${testingFramework === 'Vitest' ? 'vitest' : '@jest/globals'}');`,
+      
+      'python': `Generate comprehensive unit tests using ${testingFramework}.
+Use proper Python test class structure.
+Import syntax: import pytest (or import unittest).
+Use test_ prefix for test functions.`,
+      
+      'java': `Generate comprehensive unit tests using ${testingFramework}.
+Use @Test annotations.
+Import syntax: import org.junit.Test; import static org.junit.Assert.*;`,
+      
+      'go': `Generate comprehensive unit tests using Go's testing package.
+Use func TestXxx(t *testing.T) pattern.
+Import syntax: import "testing"`,
+    };
 
-Code:
-\`\`\`
+    const instructions = languageInstructions[language] || 
+      `Generate comprehensive unit tests in ${language} using ${testingFramework}.`;
+
+    return `
+${instructions}
+
+Include tests covering:
+- Happy paths (normal expected inputs)
+- Edge cases (boundary conditions, empty inputs)
+- Error cases (invalid inputs, exceptions)
+
+Code to test:
+\`\`\`${language}
 ${functionCode}
 \`\`\`
+
+Generate ONLY the test code, no explanations. The test code must be in ${language}, not JavaScript.
     `.trim();
+  }
+
+  private static getDefaultFramework(language: string): string {
+    const frameworks: Record<string, string> = {
+      'typescript': 'Vitest',
+      'javascript': 'Jest',
+      'python': 'pytest',
+      'java': 'JUnit',
+      'go': 'testing',
+      'rust': 'cargo test',
+      'csharp': 'xUnit'
+    };
+    return frameworks[language] || 'appropriate testing framework';
   }
   
   static batchProcess(files: Map<string, string>, context: GeminiContext): string {
@@ -170,7 +220,7 @@ CRITICAL: In the "fixedCode" field, you MUST return the exact original code that
       : "None";
     
     const commitsStr = context.recentCommits.length > 0
-      ? context.recentCommits.slice(0, 5).join("\n- ")
+      ? context.recentCommits.slice(0, 5).join("\n  ")
       : "None";
 
     const pastSessionsStr = context.relevantPastSessions && context.relevantPastSessions.length > 0
@@ -182,27 +232,30 @@ CRITICAL: In the "fixedCode" field, you MUST return the exact original code that
     return `
 You MUST respond with ONLY valid JSON. No explanations, no markdown, no conversational text.
 
-CONTEXT:
-- Active File: ${context.activeFile || "Unknown"}
-- Related Files: ${relatedFilesStr}
-- Recent Commits: ${commitsStr}
-- Edit Count: ${context.editCount}
-- Git Diff: ${context.gitDiffSummary || "No changes"}
-- Past Sessions: ${pastSessionsStr}
-- User Intent: ${context.userIntent || "General improvements"}
+WHAT THE USER WAS JUST WORKING ON:
+- Currently open file: ${context.activeFile || "Unknown"}
+- Other files they had open: ${relatedFilesStr}
+- Number of edits made: ${context.editCount}
+- Recent git activity:
+  ${commitsStr}
+- Uncommitted changes: ${context.gitDiffSummary || "No uncommitted changes"}
 
-YOUR TASK:
-Analyze the codebase and respond with ONLY this JSON structure (no other text):
+HISTORICAL CONTEXT (for reference):
+${pastSessionsStr || "No previous sessions"}
+
+TASK: Analyze what the user was ACTUALLY working on based on their open files and recent edits. Focus your summary on THEIR RECENT WORK, not generic code issues.
+
+RESPOND WITH THIS EXACT JSON STRUCTURE:
 
 {
-  "summary": "Human-readable summary of current state and improvements",
+  "summary": "Start with: 'While you were away, I noticed you were working on [describe what they were ACTUALLY editing based on active file and commits]. Here's what I found...' Then provide 2-3 sentences about their specific work context and what might be helpful.",
   "tests": [
-    "// Complete test file content as string"
+    "// Complete test file content as string - generate tests for the files they were ACTUALLY editing"
   ],
   "recommendations": [
     {
       "priority": "high",
-      "message": "Actionable recommendation"
+      "message": "Specific recommendation related to what they were working on"
     }
   ]
 }

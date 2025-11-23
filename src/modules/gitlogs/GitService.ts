@@ -27,7 +27,7 @@ export class GitService implements IGitService {
         fields: ["hash", "authorName", "authorDate", "subject", "files"],
       });
 
-      return commits.map((c: any) => ({
+      return commits.map((c: { hash: string; authorName: string; authorDate: string; subject: string; files?: string[] }) => ({
         hash: c.hash,
         message: c.subject,
         author: c.authorName,
@@ -67,7 +67,9 @@ export class GitService implements IGitService {
       const lines = statusStdout.trim().split('\n');
       
       for (const line of lines) {
-        if (line.length < 3) continue;
+        if (line.length < 3) {
+          continue;
+        }
         
         const status = line.substring(0, 2);
         const filePath = line.substring(3).trim();
@@ -93,7 +95,7 @@ export class GitService implements IGitService {
     await execPromise(`git add ${files.join(' ')} && git commit -m "${message}"`, { cwd: this.repoPath });
   }
 
-  public async applyDiff(diff: string): Promise<void> {
+  public async applyDiff(_diff: string): Promise<void> {
     // This is complex to implement with just exec, usually requires a patch file
     // For now, we'll leave it as a placeholder or implement basic apply
     throw new Error("Method not implemented.");
@@ -116,7 +118,7 @@ export class GitService implements IGitService {
   public async checkoutBranch(branchName: string): Promise<void> {
     try {
       await execPromise(`git checkout ${branchName}`, { cwd: this.repoPath });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Failed to checkout branch ${branchName}:`, error);
       throw error;
     }
@@ -126,7 +128,7 @@ export class GitService implements IGitService {
     try {
       const flag = force ? '-D' : '-d';
       await execPromise(`git branch ${flag} ${branchName}`, { cwd: this.repoPath });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Failed to delete branch ${branchName}:`, error);
       throw error;
     }
@@ -135,7 +137,7 @@ export class GitService implements IGitService {
   public async mergeBranch(branchName: string): Promise<void> {
     try {
       await execPromise(`git merge ${branchName}`, { cwd: this.repoPath });
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Failed to merge branch ${branchName}:`, error);
       throw error;
     }

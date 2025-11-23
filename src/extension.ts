@@ -13,6 +13,9 @@ import { AutonomousAgent } from './modules/autonomous/AutonomousAgent';
 import { DashboardProvider } from './ui/DashboardProvider';
 import { IdleService } from './modules/idle-detector/idle-service';
 import { registerTestCommand } from './test/test-autonomous-pipeline';
+import { AICodeActionProvider } from './services/AICodeActionProvider';
+import { TestFileGenerator } from './utils/testFileGenerator';
+import { SurgicalLintFixer } from './services/SurgicalLintFixer';
 
 // Import real services
 import { ContextService } from './services/real/ContextService';
@@ -60,6 +63,8 @@ let lintingService: LintingService;
 let ingestionService: ContextIngestionService;
 let idleService: IdleService;
 let autonomousAgent: AutonomousAgent;
+let codeActionProvider: AICodeActionProvider;
+let orchestrator: import('./modules/orchestrator/orchestrator').Orchestrator | null = null; // Global orchestrator reference for AI edits tracking
 
 // State
 let currentContext: DeveloperContext | null = null;
@@ -260,8 +265,38 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.registerWebviewViewProvider(DashboardProvider.viewType, dashboardProvider)
     );
 
+    // 3.5 Register CodeActionProvider (for AI suggestions with accept/reject)
+    codeActionProvider = new AICodeActionProvider();
+    context.subscriptions.push(
+      vscode.languages.registerCodeActionsProvider(
+        { scheme: 'file', pattern: '**/*' },
+        codeActionProvider,
+        {
+          providedCodeActionKinds: [
+            vscode.CodeActionKind.QuickFix,
+            vscode.CodeActionKind.RefactorRewrite
+          ]
+        }
+      )
+    );
+    console.log('[Extension] Registered CodeActionProvider for AI suggestions');
+
+    // 3.6 Create TestFileGenerator
+    const testFileGenerator = new TestFileGenerator();
+    console.log('[Extension] TestFileGenerator created');
+
+    // 3.7 Create SurgicalLintFixer
+    const surgicalLintFixer = new SurgicalLintFixer(codeActionProvider);
+    console.log('[Extension] SurgicalLintFixer created');
+
     // 4. Initialize Autonomous Agent
     autonomousAgent = new AutonomousAgent(gitService, geminiService, contextService);
+    
+    // Wire up services for safe operations
+    autonomousAgent.setCodeActionProvider(codeActionProvider);
+    autonomousAgent.setTestFileGenerator(testFileGenerator);
+    autonomousAgent.setSurgicalLintFixer(surgicalLintFixer);
+    console.log('[Extension] AutonomousAgent initialized with safe operation services');
 
     // 5. Initialize Orchestrator for idle improvements
     const cloudflareWorkerUrl = config.get<string>('cloudflare.workerUrl') || process.env.CLOUDFLARE_WORKER_URL || '';
@@ -273,10 +308,9 @@ export async function activate(context: vscode.ExtensionContext) {
     };
     
     // Only initialize Orchestrator if we have required config
-    let orchestrator: any = null;
     if (cloudflareWorkerUrl && geminiApiKey) {
       try {
-        const orchestratorModule = await import('./modules/orchestrator/orchestrator');
+        const orchestratorModule = await import('./modules/orchestrator/orchestrator.js');
         const { Orchestrator } = orchestratorModule;
         orchestrator = new Orchestrator(orchestratorConfig);
         await orchestrator.initialize();
@@ -290,61 +324,68 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     // 6. Initialize Idle Detection Service
-    // SAFETY: Check if autonomous mode is enabled before starting
-    const autonomousEnabled = config.get<boolean>('autonomous.enabled', false);
+    const autonomousEnabled = config.get<boolean>('autonomous.enabled', true);
     
-    idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService); // 15 seconds threshold
+    idleService = new IdleService(storageService, { thresholdMs: 15000 }, geminiService, voiceService); // 15 seconds threshold
     
-    // Only wire up autonomous features if explicitly enabled
-    if (autonomousEnabled && orchestrator && autonomousAgent) {
-      idleService.setWorkflowServices(orchestrator, autonomousAgent);
-      
-      // NEW: Wire up UI callback to display idle improvements
-      idleService.onIdleImprovementsComplete((result) => {
-        console.log('[Extension] Idle improvements complete, updating UI...');
+    // Wire up autonomous features if enabled
+    if (autonomousEnabled) {
+      // If we have orchestrator, use the full workflow
+      if (orchestrator && autonomousAgent) {
+        console.log('[Extension] Wiring up full autonomous workflow with orchestrator');
+        idleService.setWorkflowServices(orchestrator, autonomousAgent);
         
-        // Send result to sidebar webview
-        try {
-          const message: ExtensionToUIMessage = {
-            type: 'idleImprovementsComplete',
-            payload: {
-              summary: result.summary,
-              testsGenerated: result.tests.length,
-              recommendations: result.recommendations,
-              timestamp: Date.now()
+        // Wire up UI callback to display idle improvements
+        idleService.onIdleImprovementsComplete((result) => {
+          console.log('[Extension] Idle improvements complete, updating UI...');
+          
+          // Send result to sidebar webview
+          try {
+            const message: ExtensionToUIMessage = {
+              type: 'idleImprovementsComplete',
+              payload: {
+                summary: result.summary,
+                testsGenerated: result.tests.length,
+                recommendations: result.recommendations,
+                timestamp: Date.now()
+              }
+            };
+            
+            sidebarProvider.postMessage(message);
+            recordChange(`Idle analysis: ${result.summary}`, 'idle-improvements', 'autonomous');
+            
+            if (result.tests.length > 0) {
+              recordChange(`Generated ${result.tests.length} test file(s)`, 'test-generation', 'autonomous');
             }
-          };
-          
-          sidebarProvider.postMessage(message);
-          recordChange(`Idle analysis: ${result.summary}`, 'idle-improvements', 'autonomous');
-          
-          if (result.tests.length > 0) {
-            recordChange(`Generated ${result.tests.length} test file(s)`, 'test-generation', 'autonomous');
-          }
-          
-          result.recommendations.slice(0, 5).forEach(rec => {
-            recordChange(`[${rec.priority.toUpperCase()}] ${rec.message}`, 'recommendation', 'autonomous');
-          });
-        } catch (error) {
-          console.error('[Extension] Failed to send idle improvements to UI:', error);
-        }
-      });
-    } else {
-      // DISABLED: Legacy callback was too dangerous - auto-edited files
-      console.log('[Extension] Legacy autonomous agent callback DISABLED for safety');
-      
-      // Simple notification instead
-      idleService.onIdle(async () => {
-        console.log('ContextKeeper: Idle detected (legacy mode disabled)');
-        vscode.window.showInformationMessage(
-          'You\'ve been idle. Enable autonomous mode in settings to get AI suggestions.',
-          'Enable'
-        ).then(selection => {
-          if (selection === 'Enable') {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'copilot.autonomous.enabled');
+            
+            result.recommendations.slice(0, 5).forEach(rec => {
+              recordChange(`[${rec.priority.toUpperCase()}] ${rec.message}`, 'recommendation', 'autonomous');
+            });
+          } catch (error) {
+            console.error('[Extension] Failed to send idle improvements to UI:', error);
           }
         });
-      });
+      } else {
+        // Fallback: Basic idle notification without full orchestrator workflow
+        console.log('[Extension] Orchestrator not available, using basic idle workflow');
+        idleService.onIdle(async () => {
+          console.log('[Extension] Idle detected - running basic analysis');
+          try {
+            // Get current context and run analysis
+            await refreshContext();
+            const editor = vscode.window.activeTextEditor;
+            if (editor && currentContext) {
+              const code = editor.document.getText();
+              const analysis = await aiService.analyze(code, currentContext);
+              recordChange(`Idle analysis: Found ${analysis.issues.length} issues`, 'idle-analysis', 'autonomous');
+            }
+          } catch (error) {
+            console.error('[Extension] Idle analysis failed:', error);
+          }
+        });
+      }
+    } else {
+      console.log('[Extension] Autonomous mode disabled by user');
     }
     
     await idleService.initialize();
@@ -381,6 +422,13 @@ function setupServiceListeners() {
   // Listen to context service events
   contextService.on('contextCollected', (context: DeveloperContext) => {
     currentContext = context;
+    
+    // Augment context with AI edits count if orchestrator is available
+    if (orchestrator && typeof orchestrator.getAIEditsCount === 'function') {
+      // Override totalEdits with AI edits count
+      context.session.totalEdits = orchestrator.getAIEditsCount();
+    }
+    
     sidebarProvider.updateContext(context);
     // Update the status bar with fresh developer context
     try {
@@ -520,6 +568,16 @@ function _registerCommands(context: vscode.ExtensionContext) {
       NotificationManager.showSuccess('Fix application coming soon!');
     })
   );
+
+  // Register dismiss AI suggestion command
+  context.subscriptions.push(
+    vscode.commands.registerCommand('contextkeeper.dismissAISuggestion', (fileKey: string) => {
+      if (codeActionProvider) {
+        codeActionProvider.dismissSuggestion(fileKey);
+        vscode.window.showInformationMessage('AI suggestion dismissed');
+      }
+    })
+  );
 }
 
 /**
@@ -554,8 +612,8 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         await cfg.update('voice.elevenEnabled', message.enabled, true);
-        if (voiceService && (voiceService as any).setEnabled) {
-          (voiceService as any).setEnabled(message.enabled);
+        if (voiceService && 'setEnabled' in voiceService && typeof (voiceService as { setEnabled?: (enabled: boolean) => void }).setEnabled === 'function') {
+          (voiceService as { setEnabled: (enabled: boolean) => void }).setEnabled(message.enabled);
         }
         vscode.window.showInformationMessage(`Sound ${message.enabled ? 'enabled' : 'disabled'}`);
         recordChange(`ElevenLabs voice ${message.enabled ? 'enabled' : 'disabled'}`, 'voice');
@@ -570,8 +628,8 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         await cfg.update('notifications.enabled', message.enabled, true);
-        if ((NotificationManager as any)?.setEnabled) {
-          (NotificationManager as any).setEnabled(message.enabled);
+        if ('setEnabled' in NotificationManager && typeof (NotificationManager as { setEnabled?: (enabled: boolean) => void }).setEnabled === 'function') {
+          (NotificationManager as { setEnabled: (enabled: boolean) => void }).setEnabled(message.enabled);
         }
         vscode.window.showInformationMessage(`Notifications ${message.enabled ? 'enabled' : 'disabled'}`);
         recordChange(`Notifications ${message.enabled ? 'enabled' : 'disabled'}`, 'notifications');
@@ -586,8 +644,8 @@ async function handleWebviewMessage(message: UIToExtensionMessage) {
       try {
         const cfg = vscode.workspace.getConfiguration('copilot');
         await cfg.update('voice.elevenEnabled', true, true);
-        if (voiceService && (voiceService as any).setEnabled) {
-          (voiceService as any).setEnabled(true);
+        if (voiceService && 'setEnabled' in voiceService && typeof (voiceService as { setEnabled?: (enabled: boolean) => void }).setEnabled === 'function') {
+          (voiceService as { setEnabled: (enabled: boolean) => void }).setEnabled(true);
         }
         sidebarProvider.postMessage({ type: 'elevenVoiceState', enabled: true });
       } catch (error) {

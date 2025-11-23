@@ -117,7 +117,7 @@
       "properties": {
         "copilot.autonomous.enabled": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Enable autonomous mode (runs automatically when idle)"
         },
         "copilot.autonomous.idleTimeout": {

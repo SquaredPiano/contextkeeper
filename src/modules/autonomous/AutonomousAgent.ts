@@ -1,12 +1,20 @@
 import { IGitService, IAIService, IContextService, DeveloperContext } from '../../services/interfaces';
-import { TaskRegistry, IAutonomousTask } from './TaskRunner';
+import { TaskRegistry } from './TaskRunner';
 import { CloudflareService } from '../../services/real/CloudflareService';
 import * as vscode from 'vscode';
+import type { AICodeActionProvider } from '../../services/AICodeActionProvider';
+import type { TestFileGenerator } from '../../utils/testFileGenerator';
+import type { SurgicalLintFixer } from '../../services/SurgicalLintFixer';
+import { TestRunner } from '../../services/TestRunner';
 
 export class AutonomousAgent {
     private isRunning: boolean = false;
     private taskRegistry: TaskRegistry;
     private cloudflareService: CloudflareService;
+    private codeActionProvider: AICodeActionProvider | null = null;
+    private testFileGenerator: TestFileGenerator | null = null;
+    private surgicalLintFixer: SurgicalLintFixer | null = null;
+    private testRunner: TestRunner;
 
     constructor(
         private gitService: IGitService,
@@ -15,7 +23,29 @@ export class AutonomousAgent {
     ) {
         this.taskRegistry = new TaskRegistry();
         this.cloudflareService = new CloudflareService();
+        this.testRunner = new TestRunner();
         this.registerDefaultTasks();
+    }
+
+    /**
+     * Set the CodeActionProvider for creating surgical lint fix suggestions
+     */
+    setCodeActionProvider(provider: AICodeActionProvider): void {
+        this.codeActionProvider = provider;
+    }
+
+    /**
+     * Set the TestFileGenerator for creating test files
+     */
+    setTestFileGenerator(generator: TestFileGenerator): void {
+        this.testFileGenerator = generator;
+    }
+
+    /**
+     * Set the SurgicalLintFixer for precise lint fixes
+     */
+    setSurgicalLintFixer(fixer: SurgicalLintFixer): void {
+        this.surgicalLintFixer = fixer;
     }
 
     private registerDefaultTasks() {
@@ -23,7 +53,7 @@ export class AutonomousAgent {
         this.taskRegistry.register({
             name: 'auto-lint',
             description: 'Lint code using Cloudflare Worker and commit results',
-            run: async (context: DeveloperContext) => {
+            run: async (_context: DeveloperContext) => {
                 console.log('[AutonomousAgent] Running Auto-Lint...');
                 const editor = vscode.window.activeTextEditor;
                 
@@ -36,7 +66,7 @@ export class AutonomousAgent {
                 const document = editor.document;
                 const code = document.getText();
                 const language = document.languageId;
-                const fileName = document.fileName;
+                const _fileName = document.fileName;
 
                 try {
                     const results = await this.cloudflareService.lintCode(code, language);
@@ -44,27 +74,42 @@ export class AutonomousAgent {
                     if (results.length > 0) {
                         const message = `Found ${results.length} lint issues`;
                         console.log(`[AutonomousAgent] ${message}:`, results.map(r => r.message));
-                        vscode.window.showWarningMessage(
-                            `${message}: ${results.slice(0, 3).map(r => r.message).join(', ')}${results.length > 3 ? '...' : ''}`
-                        );
                         
-                        // DISABLED: Auto-editing files is dangerous
-                        // Create a notification instead
-                        vscode.window.showWarningMessage(
-                            `Lint Report: ${results.length} issues found. Review manually.`,
-                            'Show Details'
-                        ).then(selection => {
-                            if (selection === 'Show Details') {
-                                const report = results.map(r => `Line ${r.line}: ${r.message}`).join('\n');
-                                vscode.window.showInformationMessage(report);
+                        // If CodeActionProvider is available, create surgical fix suggestions
+                        if (this.codeActionProvider) {
+                            // For each lint issue, create a precise fix suggestion
+                            for (const issue of results.slice(0, 10)) { // Limit to 10 issues
+                                const edit = new vscode.WorkspaceEdit();
+                                const lineNumber = issue.line - 1; // Convert to 0-indexed
+                                const _line = document.lineAt(lineNumber);
+                                
+                                // Add a comment about the issue as a suggestion
+                                // In production, you'd use AI to generate actual fixes
+                                const fixComment = `// FIX: ${issue.message}`;
+                                edit.insert(document.uri, new vscode.Position(lineNumber, 0), fixComment + '\n');
+                                
+                                this.codeActionProvider.addSuggestion(
+                                    document.uri,
+                                    `Fix: ${issue.message}`,
+                                    edit,
+                                    `Line ${issue.line}: ${issue.message}`
+                                );
                             }
-                        });
-                        
-                        console.log('[AutonomousAgent] Lint report generated (auto-edit DISABLED)');
-                        
-                        // REMOVED: Automatic file modification and git commit
-                        // Original code was inserting comments into files and auto-committing
-                        // This was too aggressive and dangerous
+                            
+                            vscode.window.showInformationMessage(
+                                `💡 ${results.length} lint fix suggestions available. Click the lightbulb icon to apply.`,
+                                'Show Quick Fix'
+                            ).then(selection => {
+                                if (selection === 'Show Quick Fix') {
+                                    vscode.commands.executeCommand('editor.action.quickFix');
+                                }
+                            });
+                        } else {
+                            // Fallback: just show the issues
+                            vscode.window.showWarningMessage(
+                                `${message}: ${results.slice(0, 3).map(r => r.message).join(', ')}${results.length > 3 ? '...' : ''}`
+                            );
+                        }
                     } else {
                         console.log('[AutonomousAgent] No lint issues found');
                         vscode.window.showInformationMessage('✅ No lint issues found');
@@ -114,13 +159,10 @@ export class AutonomousAgent {
                 vscode.window.showInformationMessage(`Autonomous Agent proposed goal: ${sessionGoal}`);
             }
 
-            // 3. Create a new branch for this session
-            const safeGoalName = sessionGoal.replace(/[^a-zA-Z0-9]/g, '-').toLowerCase().substring(0, 30);
-            const branchName = `copilot/${safeGoalName}-${Date.now()}`;
-            
-            console.log(`[AutonomousAgent] Creating branch: ${branchName}`);
-            await this.gitService.createBranch(branchName);
-            vscode.window.showInformationMessage(`Started autonomous session on branch: ${branchName}`);
+            // 3. DISABLED: Branch creation was too intrusive
+            // No longer creating automatic branches - user can manually create branches if needed
+            console.log(`[AutonomousAgent] Starting autonomous session (no branch creation)`);
+            vscode.window.showInformationMessage(`Starting autonomous work: ${sessionGoal}`);
 
             // 4. Execute tasks sequentially
             // Phase 1: Linting (deterministic)
@@ -133,13 +175,14 @@ export class AutonomousAgent {
             
             // 5. Show completion summary
             vscode.window.showInformationMessage(
-                `✅ Autonomous work complete on branch ${branchName}!\n` +
+                `✅ Autonomous work complete!\n` +
                 `Completed: Linting and Test Generation`
             );
 
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error('[AutonomousAgent] Session failed:', error);
-            vscode.window.showErrorMessage(`Autonomous session failed: ${error.message}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            vscode.window.showErrorMessage(`Autonomous session failed: ${errorMessage}`);
         } finally {
             this.isRunning = false;
         }
@@ -162,7 +205,7 @@ export class AutonomousAgent {
         }
     }
 
-    private async runAutoFix(context: DeveloperContext): Promise<void> {
+    private async runAutoFix(_context: DeveloperContext): Promise<void> {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             console.log('No active editor for Auto-Fix.');
@@ -189,20 +232,43 @@ export class AutonomousAgent {
         try {
             const fix = await this.aiService.fixError(fullCode, `${error.message} at line ${range.start.line + 1}`);
 
-            if (fix && fix.explanation) {
-                // SAFE: Only show explanation, don't auto-edit
-                vscode.window.showInformationMessage(
-                    `Fix suggestion for "${error.message}": ${fix.explanation}`,
-                    'Copy Suggestion'
-                ).then(selection => {
-                    if (selection === 'Copy Suggestion') {
-                        vscode.env.clipboard.writeText(fix.explanation || '');
-                        vscode.window.showInformationMessage('Suggestion copied to clipboard');
-                    }
-                });
-                
-                console.log('[AutonomousAgent] Auto-Fix DISABLED - showed suggestion instead');
-                // REMOVED: Automatic file replacement and git commit (too dangerous)
+            if (fix && fix.fixedCode) {
+                // Use CodeActionProvider to show fix as suggestion
+                if (this.codeActionProvider) {
+                    const edit = new vscode.WorkspaceEdit();
+                    const fullRange = new vscode.Range(
+                        document.positionAt(0),
+                        document.positionAt(fullCode.length)
+                    );
+                    edit.replace(document.uri, fullRange, fix.fixedCode);
+                    
+                    this.codeActionProvider.addSuggestion(
+                        document.uri,
+                        `AI Fix: ${error.message}`,
+                        edit,
+                        `Apply AI-generated fix for "${error.message}" at line ${range.start.line + 1}`
+                    );
+                    
+                    vscode.window.showInformationMessage(
+                        `💡 AI fix available. Click the lightbulb to apply.`,
+                        'Show Quick Fix'
+                    ).then(selection => {
+                        if (selection === 'Show Quick Fix') {
+                            vscode.commands.executeCommand('editor.action.quickFix');
+                        }
+                    });
+                } else {
+                    // Fallback: show in output
+                    vscode.window.showInformationMessage(
+                        'Fix generated. CodeActionProvider not available.',
+                        'View Fix'
+                    ).then(selection => {
+                        if (selection === 'View Fix') {
+                            vscode.env.clipboard.writeText(fix.fixedCode);
+                            vscode.window.showInformationMessage('Fixed code copied to clipboard');
+                        }
+                    });
+                }
             }
         } catch (err) {
             console.error('Auto-Fix failed:', err);
@@ -210,20 +276,54 @@ export class AutonomousAgent {
         }
     }
 
-    private async runGenerateTests(context: DeveloperContext): Promise<void> {
+    private async runGenerateTests(_context: DeveloperContext): Promise<void> {
         const editor = vscode.window.activeTextEditor;
         if (!editor) { return; }
 
         const code = editor.document.getText();
         const filePath = editor.document.fileName;
+        const languageId = editor.document.languageId; // Get VS Code language ID
+        
+        // Map VS Code language IDs to our language names
+        const languageMap: Record<string, string> = {
+            'typescript': 'typescript',
+            'javascript': 'javascript',
+            'python': 'python',
+            'java': 'java',
+            'go': 'go',
+            'rust': 'rust',
+            'cpp': 'cpp',
+            'c': 'c',
+            'csharp': 'csharp'
+        };
+        
+        const detectedLanguage = languageMap[languageId] || 'typescript';
+        console.log(`[AutonomousAgent] Generating tests for ${detectedLanguage} code`);
         
         try {
-            const testCode = await this.aiService.generateTests(code);
+            // Generate tests in the SAME language as the source file
+            const testCode = await this.aiService.generateTests(code, detectedLanguage);
             
-            // SAFE: Show test code in output channel instead of creating file
+            // Use TestFileGenerator if available
+            if (this.testFileGenerator) {
+                const uri = await this.testFileGenerator.createTestFile(filePath, testCode, undefined, detectedLanguage);
+                if (uri) {
+                    vscode.window.showInformationMessage(
+                        `✅ Test file created: ${vscode.workspace.asRelativePath(uri)}`,
+                        'Open File'
+                    ).then(selection => {
+                        if (selection === 'Open File') {
+                            vscode.window.showTextDocument(uri);
+                        }
+                    });
+                }
+                return;
+            }
+            
+            // Fallback: Show test code in output channel
             const outputChannel = vscode.window.createOutputChannel('Generated Tests');
             outputChannel.clear();
-            outputChannel.appendLine('// Generated test code:');
+            outputChannel.appendLine(`// Generated ${detectedLanguage} test code:`);
             outputChannel.appendLine(testCode);
             outputChannel.show();
             
@@ -235,40 +335,11 @@ export class AutonomousAgent {
                     vscode.env.clipboard.writeText(testCode);
                 }
             });
-            
-            console.log('[AutonomousAgent] Test generation DISABLED - showed in output instead');
-            return; // Skip file creation below
-            
-            // REMOVED BELOW: Automatic test file creation
-            // Assuming convention: filename.test.ts
-            const testFilePath = filePath.replace(/\.ts$/, '.test.ts');
-            const testUri = vscode.Uri.file(testFilePath);
 
-            // Check if exists
-            try {
-                await vscode.workspace.fs.stat(testUri);
-                // If exists, maybe append or replace? For now, let's skip or overwrite.
-                // Let's overwrite for "Thin Path"
-            } catch {
-                // Doesn't exist, good.
-            }
-
-            const edit = new vscode.WorkspaceEdit();
-            edit.createFile(testUri, { overwrite: true });
-            edit.insert(testUri, new vscode.Position(0, 0), testCode);
-            
-            await vscode.workspace.applyEdit(edit);
-            const doc = await vscode.workspace.openTextDocument(testUri);
-            await doc.save();
-
-            vscode.window.showInformationMessage(`Generated tests: ${testFilePath}`);
-            
-            // Commit
-            await this.gitService.commit(`Auto-Test: Generated tests for ${vscode.workspace.asRelativePath(filePath)}`, [testFilePath]);
-
-        } catch (error: any) {
+        } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
             console.error('Generate Tests failed:', error);
-            vscode.window.showErrorMessage(`Failed to generate tests: ${error.message}`);
+            vscode.window.showErrorMessage(`Failed to generate tests: ${errorMsg}`);
         }
     }
 
@@ -286,75 +357,279 @@ export class AutonomousAgent {
 
     /**
      * Ensure idle improvements branch exists.
-     * Creates or switches to auto/idle-improvements branch.
+     * Creates ONE timestamped branch per idle session.
      * Does NOT modify code - only branch management.
      */
     async ensureIdleBranch(): Promise<void> {
-        const branchName = 'auto/idle-improvements';
+        // Create a timestamped branch for this idle session
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const branchName = `copilot/idle-${timestamp}`;
         
         try {
             const currentBranch = await this.gitService.getCurrentBranch();
             
-            if (currentBranch === branchName) {
-                console.log(`[AutonomousAgent] Already on ${branchName} branch`);
+            // Only create if we're not already on an idle branch
+            if (currentBranch.startsWith('copilot/idle-')) {
+                console.log(`[AutonomousAgent] Already on idle branch: ${currentBranch}`);
                 return;
             }
 
-            // Try to create and switch to the branch
-            // If branch exists, this will fail, so we handle it
-            try {
-                await this.gitService.createBranch(branchName);
-                console.log(`[AutonomousAgent] Created and switched to ${branchName} branch`);
-            } catch (error: any) {
-                // Branch might already exist, try to switch to it
-                if (error.message && error.message.includes('already exists')) {
-                    // Use git checkout to switch to existing branch
-                    // Note: GitService doesn't have checkout, so we'll handle it gracefully
-                    console.log(`[AutonomousAgent] Branch ${branchName} already exists, attempting to switch...`);
-                    // For now, we'll just log - the branch management is simplified
-                    // In production, you might want to add a checkout method to GitService
-                } else {
-                    throw error;
-                }
-            }
+            // Create the new timestamped branch
+            await this.gitService.createBranch(branchName);
+            console.log(`[AutonomousAgent] ✓ Created timestamped idle branch: ${branchName}`);
         } catch (error) {
-            console.error(`[AutonomousAgent] Failed to ensure idle branch:`, error);
-            // Don't throw - allow workflow to continue even if branch switch fails
+            console.error(`[AutonomousAgent] Failed to create idle branch:`, error);
+            // Don't throw - allow workflow to continue even if branch creation fails
         }
     }
 
     /**
-     * Store idle improvements results in LanceDB.
-     * Does NOT modify user code - only stores test artifacts and session data.
+     * Create lint fix suggestions with Keep/Undo UI for VS Code diagnostics
+     */
+    async createLintFixSuggestions(
+        uri: vscode.Uri,
+        diagnostics: vscode.Diagnostic[]
+    ): Promise<number> {
+        if (!this.codeActionProvider) {
+            console.warn('[AutonomousAgent] CodeActionProvider not available');
+            return 0;
+        }
+
+        let fixCount = 0;
+
+        try {
+            const document = await vscode.workspace.openTextDocument(uri);
+
+            for (const diagnostic of diagnostics) {
+                // Only create fixes for errors and warnings (not info/hints)
+                if (diagnostic.severity !== vscode.DiagnosticSeverity.Error && 
+                    diagnostic.severity !== vscode.DiagnosticSeverity.Warning) {
+                    continue;
+                }
+
+                // Use AI to generate a fix for this diagnostic
+                try {
+                    const lineText = document.lineAt(diagnostic.range.start.line).text;
+                    const fix = await this.generateFixForDiagnostic(document, diagnostic, lineText);
+
+                    if (fix) {
+                        this.codeActionProvider.addSuggestion(
+                            uri,
+                            `Fix: ${diagnostic.message}`,
+                            fix,
+                            `Line ${diagnostic.range.start.line + 1}: ${diagnostic.message}`
+                        );
+                        fixCount++;
+                    }
+                } catch (error) {
+                    console.warn(`[AutonomousAgent] Failed to generate fix for "${diagnostic.message}":`, error);
+                }
+            }
+
+            if (fixCount > 0) {
+                vscode.window.showInformationMessage(
+                    `💡 ${fixCount} lint fix(es) available. Click the lightbulb to review and apply.`,
+                    'Show Quick Fix'
+                ).then(selection => {
+                    if (selection === 'Show Quick Fix') {
+                        vscode.commands.executeCommand('editor.action.quickFix');
+                    }
+                });
+            }
+
+        } catch (error) {
+            console.error('[AutonomousAgent] Failed to create lint fix suggestions:', error);
+        }
+
+        return fixCount;
+    }
+
+    /**
+     * Generate a precise fix for a diagnostic using AI
+     */
+    private async generateFixForDiagnostic(
+        document: vscode.TextDocument,
+        diagnostic: vscode.Diagnostic,
+        lineText: string
+    ): Promise<vscode.WorkspaceEdit | null> {
+        const edit = new vscode.WorkspaceEdit();
+
+        // Simple heuristic fixes (can be replaced with AI service calls later)
+        const message = diagnostic.message.toLowerCase();
+
+        // Fix: "n" should be n (typo - string instead of variable)
+        if (message.includes('string') && message.includes('numeric') && lineText.includes('"n"')) {
+            const newText = lineText.replace('"n"', 'n');
+            const line = document.lineAt(diagnostic.range.start.line);
+            edit.replace(document.uri, line.range, newText);
+            return edit;
+        }
+
+        // Fix: Incorrect logic order (FizzBuzz)
+        if (message.includes('fizzbuzz') && message.includes('condition') && message.includes('first')) {
+            // This is more complex - we'd need AI to reorder the if statements
+            // For now, skip complex refactorings
+            return null;
+        }
+
+        // Generic fix: Add a TODO comment
+        const lineNumber = diagnostic.range.start.line;
+        const indent = lineText.match(/^\s*/)?.[0] || '';
+        edit.insert(
+            document.uri, 
+            new vscode.Position(lineNumber, 0), 
+            `${indent}// TODO: Fix - ${diagnostic.message}\n`
+        );
+
+        return edit;
+    }
+
+    /**
+     * Store idle improvements AND generate actual test files + code action suggestions.
+     * Track AI edits in orchestrator. EXECUTE generated tests and capture results.
      */
     async storeIdleResults(
         result: import('../idle-detector/idle-service').IdleImprovementsResult,
-        storage: import('../../services/interfaces').IStorageService
+        storage: import('../../services/interfaces').IStorageService,
+        orchestrator?: unknown // Optional orchestrator for tracking AI edits
     ): Promise<void> {
         try {
-            console.log('[AutonomousAgent] Storing idle improvements results in LanceDB...');
+            console.log('[AutonomousAgent] Processing idle improvements results...');
 
-            // Create a session record with the summary
+            let aiEditsCreated = 0;
+            const testResults: Array<{path: string, passed: boolean, output: string}> = [];
+
+            // 1. Generate actual test files if tests were provided
+            if (result.tests && result.tests.length > 0 && this.testFileGenerator) {
+                console.log(`[AutonomousAgent] Generating ${result.tests.length} test files...`);
+                
+                for (const testContent of result.tests) {
+                    try {
+                        // Extract file path and content from test result
+                        // Assuming testContent is in format: "// tests/filename.test.ts\n<code>"
+                        const lines = testContent.split('\n');
+                        const firstLine = lines[0];
+                        const pathMatch = firstLine.match(/\/\/\s*(.+\.test\.[jt]s)/);
+                        
+                        if (pathMatch) {
+                            const testPath = pathMatch[1];
+                            const testCode = lines.slice(1).join('\n');
+                            
+                            // Use test file generator to create the test file
+                            const testUri = await this.testFileGenerator.createTestFile(
+                                vscode.window.activeTextEditor?.document.uri.fsPath || '',
+                                testCode
+                            );
+                            
+                            aiEditsCreated++; // Count each test file as an AI edit
+                            console.log(`[AutonomousAgent] Generated test file: ${testPath}`);
+
+                            // EXECUTE the test immediately after creating it
+                            if (testUri) {
+                                try {
+                                    console.log(`[AutonomousAgent] Executing test: ${testUri.fsPath}`);
+                                    const testResult = await this.testRunner.runTests(testUri.fsPath);
+                                    
+                                    testResults.push({
+                                        path: testPath,
+                                        passed: testResult.failed === 0 && testResult.passed > 0,
+                                        output: `${testResult.passed} passed, ${testResult.failed} failed (${testResult.duration}ms)`
+                                    });
+
+                                    console.log(`[AutonomousAgent] Test result for ${testPath}:`, testResult);
+                                } catch (testError) {
+                                    console.error(`[AutonomousAgent] Failed to execute test ${testPath}:`, testError);
+                                    testResults.push({
+                                        path: testPath,
+                                        passed: false,
+                                        output: `Execution failed: ${testError}`
+                                    });
+                                }
+                            }
+                        }
+                    } catch (error) {
+                        console.error('[AutonomousAgent] Failed to generate test file:', error);
+                    }
+                }
+                
+                // Show test execution results
+                const passedCount = testResults.filter(r => r.passed).length;
+                const failedCount = testResults.filter(r => !r.passed).length;
+                
+                const message = `✅ ${result.tests.length} test file(s) generated. ` +
+                               `Results: ${passedCount} passed, ${failedCount} failed`;
+                
+                vscode.window.showInformationMessage(
+                    message,
+                    'View Results'
+                ).then(selection => {
+                    if (selection === 'View Results') {
+                        const output = vscode.window.createOutputChannel('Test Results');
+                        output.clear();
+                        output.appendLine('=== Test Execution Results ===\n');
+                        testResults.forEach(r => {
+                            output.appendLine(`${r.passed ? '✅' : '❌'} ${r.path}`);
+                            output.appendLine(`   ${r.output}\n`);
+                        });
+                        output.show();
+                    }
+                });
+            }
+
+            // 2. Create code action suggestions for high-priority recommendations
+            if (result.recommendations && result.recommendations.length > 0 && this.codeActionProvider) {
+                const highPriorityRecs = result.recommendations.filter(r => r.priority === 'high').slice(0, 3);
+                
+                for (const rec of highPriorityRecs) {
+                    // Create a TODO comment suggestion for each recommendation
+                    const editor = vscode.window.activeTextEditor;
+                    if (editor) {
+                        const edit = new vscode.WorkspaceEdit();
+                        const position = new vscode.Position(0, 0);
+                        edit.insert(editor.document.uri, position, `// TODO: ${rec.message}\n`);
+                        
+                        this.codeActionProvider.addSuggestion(
+                            editor.document.uri,
+                            `Add TODO: ${rec.message}`,
+                            edit,
+                            `High priority recommendation from idle analysis`
+                        );
+                        
+                        aiEditsCreated++; // Count each recommendation as an AI edit
+                    }
+                }
+            }
+
+            // Track AI edits in orchestrator if available
+            if (orchestrator && aiEditsCreated > 0) {
+                if (typeof (orchestrator as { incrementAIEdits?: (count: number) => void }).incrementAIEdits === 'function') {
+                    (orchestrator as { incrementAIEdits: (count: number) => void }).incrementAIEdits(aiEditsCreated);
+                }
+                console.log(`[AutonomousAgent] Tracked ${aiEditsCreated} AI edits in orchestrator`);
+            }
+
+            // 3. Store in LanceDB for historical tracking (including test results)
             const project = vscode.workspace.name || 'Unknown Project';
-            const session = await (storage as any).createSession(result.summary, project);
+            const session = await (storage as unknown as { createSession: (summary: string, project?: string) => Promise<{ id: string }> }).createSession(result.summary, project);
 
-            // Store test artifacts as actions
             if (result.tests && result.tests.length > 0) {
-                for (const test of result.tests) {
-                    await (storage as any).addAction({
+                for (let i = 0; i < result.tests.length; i++) {
+                    const testResult = testResults[i];
+                    await (storage as unknown as { addAction: (action: { session_id: string; timestamp: number; description: string; diff: string; files: unknown[] }) => Promise<void> }).addAction({
                         session_id: session.id,
                         timestamp: Date.now(),
-                        description: `Generated test case during idle improvements`,
-                        diff: '', // No diff - these are new test files
-                        files: [] // Test files would be listed here if we were creating actual files
+                        description: testResult ? 
+                            `Generated test: ${testResult.path} - ${testResult.output}` :
+                            `Generated test case during idle improvements`,
+                        diff: '',
+                        files: []
                     });
                 }
             }
 
-            // Store recommendations as actions
             if (result.recommendations && result.recommendations.length > 0) {
                 for (const rec of result.recommendations) {
-                    await (storage as any).addAction({
+                    await (storage as unknown as { addAction: (action: { session_id: string; timestamp: number; description: string; diff: string; files: unknown[] }) => Promise<void> }).addAction({
                         session_id: session.id,
                         timestamp: Date.now(),
                         description: `[${rec.priority.toUpperCase()}] ${rec.message}`,
@@ -364,9 +639,9 @@ export class AutonomousAgent {
                 }
             }
 
-            console.log('[AutonomousAgent] Successfully stored idle improvements results');
+            console.log('[AutonomousAgent] Successfully processed and stored idle improvements');
         } catch (error) {
-            console.error('[AutonomousAgent] Failed to store idle results:', error);
+            console.error('[AutonomousAgent] Failed to process idle results:', error);
             // Don't throw - allow workflow to continue even if storage fails
         }
     }

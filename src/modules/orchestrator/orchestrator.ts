@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { GitService } from "../gitlogs/GitService";
-import { readAllFilesHandler, FileData } from "../gitlogs/fileReader";
+import { FileData } from "../gitlogs/fileReader";
 import { CloudflareClient, CloudflareLintResult } from "../cloudflare/client";
 import { GeminiClient } from "../gemini/gemini-client";
 import { ContextBuilder } from "../gemini/context-builder";
@@ -19,7 +19,11 @@ const execAsync = promisify(exec);
  * DO NOT add raw/bulk code here without sanitizing.
  */
 export interface CollectedContext {
-  git: { commits: any[]; currentBranch?: string; uncommittedChanges?: any[] };
+  git: { 
+    commits: Array<{ hash: string; message: string; author: string; date: Date; files?: string[] }>; 
+    currentBranch?: string; 
+    uncommittedChanges?: string[];
+  };
   files: {
     allFiles: FileData[];
     activeFile?: string; // File user is currently editing
@@ -94,7 +98,8 @@ export class Orchestrator extends EventEmitter {
   // Tracks user editing history for context reconstruction
   private editHistory: Array<{ file: string; timestamp: Date }> = [];
   private sessionStartTime: Date = new Date();
-  private totalEdits: number = 0;
+  private totalEdits: number = 0; // User edits from events
+  private aiEditsCount: number = 0; // AI-generated edits (tests + lint fixes)
 
   constructor(config: OrchestratorConfig) {
     super();
@@ -102,6 +107,18 @@ export class Orchestrator extends EventEmitter {
     this.cloudflareClient = new CloudflareClient(config.cloudflareWorkerUrl);
     this.geminiClient = new GeminiClient();
     this.storage = new LanceDBStorage();
+  }
+
+  /**
+   * Track AI-generated edits (tests created + lint fixes applied)
+   */
+  incrementAIEdits(count: number = 1): void {
+    this.aiEditsCount += count;
+    console.log(`[Orchestrator] AI edits count: ${this.aiEditsCount}`);
+  }
+
+  getAIEditsCount(): number {
+    return this.aiEditsCount;
   }
 
   /**
@@ -125,8 +142,8 @@ export class Orchestrator extends EventEmitter {
   }
 
   /**
-   * Collects everything we know about the workspace right now.
-   * This should be LIGHT and SANITIZED before sending anywhere.
+   * Collect MINIMAL, CURRENT-SESSION-ONLY context.
+   * NO historical data, NO all-files scan, ONLY what's relevant right now.
    */
   async collectContext(): Promise<CollectedContext> {
     this.emit("contextCollectionStarted");
@@ -143,97 +160,76 @@ export class Orchestrator extends EventEmitter {
     if (workspaceRoot) {
       context.workspace.rootPath = workspaceRoot;
 
-      // Collect git context using GitService (non-vscode dependent)
+      // Collect git context - ONLY last 3 commits and uncommitted changes
       try {
         const gitService = new GitService(workspaceRoot);
         
-        // Get recent commits
+        // Get ONLY last 3 commits (not 10)
         try {
-          const commits = await gitService.getRecentCommits(10);
+          const commits = await gitService.getRecentCommits(3);
           context.git.commits = commits || [];
-          if (commits.length === 0) {
-            console.warn("[Orchestrator] No git commits found. Repository may be empty or git not initialized.");
-          } else {
-            console.log(`[Orchestrator] Loaded ${commits.length} git commits`);
-          }
+          console.log(`[Orchestrator] Loaded ${commits.length} recent commits (limited to current session)`);
         } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error(`[Orchestrator] Failed to load git commits: ${errorMsg}`, error);
-          this.emit("contextCollectionError", { type: "git_commits", error: errorMsg });
+          console.warn('[Orchestrator] Failed to load commits:', error);
         }
 
         // Get current branch
         try {
           const branch = await gitService.getCurrentBranch();
           context.git.currentBranch = branch !== "unknown" ? branch : undefined;
-          if (branch === "unknown") {
-            console.warn("[Orchestrator] Could not determine current git branch");
-          } else {
-            console.log(`[Orchestrator] Current branch: ${branch}`);
-          }
         } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error(`[Orchestrator] Failed to get current branch: ${errorMsg}`, error);
+          console.warn('[Orchestrator] Failed to get branch:', error);
         }
 
-        // Get uncommitted changes
+        // Get uncommitted changes - this is the MOST relevant context
         try {
           const uncommitted = await gitService.getUncommittedChanges();
           context.git.uncommittedChanges = uncommitted || [];
-          if (uncommitted.length > 0) {
-            console.log(`[Orchestrator] Found ${uncommitted.length} uncommitted changes`);
-          }
+          console.log(`[Orchestrator] Found ${uncommitted.length} uncommitted changes (current session)`);
         } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error(`[Orchestrator] Failed to get uncommitted changes: ${errorMsg}`, error);
+          console.warn('[Orchestrator] Failed to get uncommitted changes:', error);
         }
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.error(`[Orchestrator] Failed to initialize GitService: ${errorMsg}`, error);
-        this.emit("contextCollectionError", { type: "git_service", error: errorMsg });
+        console.warn(`[Orchestrator] Git context collection failed:`, error);
       }
-    } else {
-      console.warn("[Orchestrator] No workspace root found, skipping git context collection");
     }
 
-    // Try reading workspace files (no raw full sends)
-    try {
-      const files = await readAllFilesHandler();
-      context.files.allFiles = files || [];
-      if (files.length === 0) {
-        console.warn("[Orchestrator] No files found in workspace");
-      } else {
-        console.log(`[Orchestrator] Loaded ${files.length} files from workspace`);
-      }
-    } catch (error) {
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      console.error(`[Orchestrator] Failed to read workspace files: ${errorMsg}`, error);
-      this.emit("contextCollectionError", { type: "file_reading", error: errorMsg });
-    }
+    // DO NOT scan all files - only track what user is actively working on
+    // Files are added to context.files.allFiles as user opens them
 
-    // Capture active editor info (file + cursor)
+    // Capture ONLY active editor (the file user is currently on)
     const activeEditor = vscode.window.activeTextEditor;
     if (activeEditor) {
       context.files.activeFile = activeEditor.document.fileName;
-      context.files.activeFileContent = activeEditor.document.getText(); // Should be sanitized!
+      context.files.activeFileContent = activeEditor.document.getText();
       context.workspace.cursor = {
         file: activeEditor.document.fileName,
         line: activeEditor.selection.active.line,
         column: activeEditor.selection.active.character,
       };
+      
+      // Add only the active file to allFiles
+      context.files.allFiles = [{
+        filePath: activeEditor.document.fileName,
+        content: activeEditor.document.getText()
+      }];
+      
+      console.log(`[Orchestrator] Active file: ${activeEditor.document.fileName}`);
+    } else {
+      console.warn('[Orchestrator] No active file');
     }
 
-    // Track open files (tabs)
+    // Track ONLY currently open tabs (not recently edited history)
     vscode.workspace.textDocuments.forEach((doc) => {
-      if (!doc.isUntitled) context.files.openFiles.push(doc.fileName);
+      if (!doc.isUntitled && doc.fileName !== context.files.activeFile) {
+        context.files.openFiles.push(doc.fileName);
+      }
     });
 
-    // Push recent edit history
-    context.files.recentlyEdited = this.editHistory.slice(-20);
+    // REMOVED: recentlyEdited history - causes irrelevant context pollution
+    // REMOVED: readAllFilesHandler - causes massive irrelevant context
 
-    // Validate context collection
-    this.validateContext(context);
-
+    console.log('[Orchestrator] Context collection complete (current session only)');
     return context;
   }
 
@@ -565,9 +561,11 @@ export class Orchestrator extends EventEmitter {
     const dependencies = await this.getDependencies(context.workspace.rootPath);
 
     return {
-      gitLogs: context.git.commits.slice(0, 10).map((commit: any) => {
-        if (typeof commit === "string") return commit;
-        return `${commit.hash || ""} - ${commit.subject || commit.message || ""}`;
+      gitLogs: context.git.commits.slice(0, 10).map((commit) => {
+        if (typeof commit === "string") {
+          return commit;
+        }
+        return `${commit.hash || ""} - ${commit.message || ""}`;
       }),
       gitDiff,
       openFiles: context.files.openFiles,
@@ -594,7 +592,7 @@ export class Orchestrator extends EventEmitter {
   ): Promise<GeminiContext> {
     // Collect all errors from lint results
     const allErrors: string[] = [];
-    for (const [filePath, lintResult] of lintResults.entries()) {
+    for (const [_filePath, lintResult] of lintResults.entries()) {
       if (lintResult?.warnings) {
         allErrors.push(...lintResult.warnings.map((w) => w.message));
       }
@@ -629,9 +627,11 @@ export class Orchestrator extends EventEmitter {
     const dependencies = await this.getDependencies(context.workspace.rootPath);
 
     const rawLogInput = {
-      gitLogs: context.git.commits.slice(0, 10).map((commit: any) => {
-        if (typeof commit === "string") return commit;
-        return `${commit.hash || ""} - ${commit.subject || commit.message || ""}`;
+      gitLogs: context.git.commits.slice(0, 10).map((commit) => {
+        if (typeof commit === "string") {
+          return commit;
+        }
+        return `${commit.hash || ""} - ${commit.message || ""}`;
       }),
       gitDiff: combinedGitDiff,
       openFiles: context.files.openFiles,
@@ -654,7 +654,9 @@ export class Orchestrator extends EventEmitter {
    * Get project structure summary (package.json, tsconfig, etc.)
    */
   private async getProjectStructure(rootPath?: string): Promise<string | undefined> {
-    if (!rootPath) return undefined;
+    if (!rootPath) {
+      return undefined;
+    }
 
     try {
       const fs = await import("fs/promises");
@@ -694,7 +696,9 @@ export class Orchestrator extends EventEmitter {
    * Get dependencies from package.json
    */
   private async getDependencies(rootPath?: string): Promise<string[] | undefined> {
-    if (!rootPath) return undefined;
+    if (!rootPath) {
+      return undefined;
+    }
 
     try {
       const fs = await import("fs/promises");
@@ -719,13 +723,21 @@ export class Orchestrator extends EventEmitter {
    * Otherwise: prioritize the active file (fast + relevant).
    */
   private getFilesToAnalyze(context: CollectedContext): FileData[] {
-    if (this.config.analyzeAllFiles) return context.files.allFiles.slice(0, this.config.maxFilesToAnalyze || 50);
+    if (this.config.analyzeAllFiles) {
+      return context.files.allFiles.slice(0, this.config.maxFilesToAnalyze || 50);
+    }
 
     const active = context.files.activeFile;
-    if (!active) return [];
+    if (!active) {
+      return [];
+    }
     const file = context.files.allFiles.find((f) => f.filePath === active || f.filePath.endsWith(active));
-    if (file) return [file];
-    if (context.files.activeFileContent) return [{ filePath: active, content: context.files.activeFileContent }];
+    if (file) {
+      return [file];
+    }
+    if (context.files.activeFileContent) {
+      return [{ filePath: active, content: context.files.activeFileContent }];
+    }
     return [];
   }
 
@@ -744,7 +756,9 @@ export class Orchestrator extends EventEmitter {
       const aiIssues = f.geminiAnalysis?.issues?.length || 0;
       const hasIssues = lintIssues + aiIssues > 0;
 
-      if (hasIssues) filesWithIssues++;
+      if (hasIssues) {
+        filesWithIssues++;
+      }
       totalIssues += lintIssues + aiIssues;
 
       const lintSeverity = (f.lintResult?.severity || "none") as "none" | "low" | "medium" | "high";
@@ -753,7 +767,9 @@ export class Orchestrator extends EventEmitter {
 
       // Pick the worst severity score
       const max = levels.reduce((a, b) => (score[b] > score[a] ? b : a), "none" as "none" | "low" | "medium" | "high");
-      if (score[max] > score[overall]) overall = max;
+      if (score[max] > score[overall]) {
+        overall = max;
+      }
     }
 
     return { totalFiles: files.length, filesWithIssues, totalIssues, overallRiskLevel: overall };
@@ -775,28 +791,120 @@ export class Orchestrator extends EventEmitter {
       const currentContext = await this.collectContext();
       console.log("[Orchestrator] Collected current context for idle improvements");
 
-      // Step 2: Query LanceDB for similar sessions and actions
-      let historicalSessions: any[] = [];
-      let historicalActions: any[] = [];
+      // Step 2: Query LanceDB for RELEVANT historical context using AST-PARSED symbols
+      // NOT generic queries - use actual function/class names from DocumentSymbol API
+      let historicalSessions: Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }> = [];
+      let historicalActions: Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }> = [];
 
-      try {
-        // Use active file or workspace root as query
-        const queryText = currentContext.files.activeFile 
-          ? `Working on ${currentContext.files.activeFile}` 
-          : currentContext.workspace.rootPath || "recent work";
+      if (currentContext.files.activeFile && currentContext.files.activeFileContent) {
+        try {
+          // Extract specific identifiers using AST parsing (VS Code DocumentSymbol API)
+          const fileName = currentContext.files.activeFile.split('/').pop() || '';
+          const activeEditor = vscode.window.activeTextEditor;
+          
+          let identifiers: string[] = [];
+          
+          if (activeEditor && activeEditor.document.fileName === currentContext.files.activeFile) {
+            // Use VS Code's DocumentSymbol API to get proper AST symbols
+            const symbols = await vscode.commands.executeCommand<vscode.DocumentSymbol[]>(
+              'vscode.executeDocumentSymbolProvider',
+              activeEditor.document.uri
+            );
+            
+            if (symbols && symbols.length > 0) {
+              // Extract function and class names from symbols
+              const extractSymbolNames = (syms: vscode.DocumentSymbol[]): string[] => {
+                const names: string[] = [];
+                for (const sym of syms) {
+                  // Only include functions, classes, methods, and interfaces
+                  if (
+                    sym.kind === vscode.SymbolKind.Function ||
+                    sym.kind === vscode.SymbolKind.Class ||
+                    sym.kind === vscode.SymbolKind.Method ||
+                    sym.kind === vscode.SymbolKind.Interface
+                  ) {
+                    names.push(sym.name);
+                  }
+                  // Recursively extract from children
+                  if (sym.children && sym.children.length > 0) {
+                    names.push(...extractSymbolNames(sym.children));
+                  }
+                }
+                return names;
+              };
+              
+              identifiers = extractSymbolNames(symbols).slice(0, 5); // Top 5 symbols
+              console.log(`[Orchestrator] Extracted ${identifiers.length} symbols from AST:`, identifiers);
+            }
+          }
+          
+          // Fallback: if no symbols found, skip historical search (better than generic queries)
+          if (identifiers.length === 0) {
+            console.log('[Orchestrator] No AST symbols found - skipping historical search to avoid irrelevant results');
+            return null;
+          }
+          
+          // Build SPECIFIC query from AST-parsed identifiers
+          const specificQuery = `${fileName} ${identifiers.join(' ')}`;
+          
+          console.log(`[Orchestrator] 🔍 Vector search query: "${specificQuery}"`);
 
-        // Query LanceDB for similar sessions and actions using embeddings
-        historicalSessions = await (this.storage as any).getSimilarSessions(queryText, 5);
-        historicalActions = await (this.storage as any).getSimilarActions(queryText, 5);
+          // Query with the SPECIFIC context
+          historicalSessions = await (this.storage as unknown as { getSimilarSessions: (query: string, limit: number) => Promise<Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }>> }).getSimilarSessions(specificQuery, 3);
+          historicalActions = await (this.storage as unknown as { getSimilarActions: (query: string, limit: number) => Promise<Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }>> }).getSimilarActions(specificQuery, 3);
 
-        console.log(`[Orchestrator] Retrieved ${historicalSessions.length} similar sessions and ${historicalActions.length} similar actions from LanceDB`);
-      } catch (error) {
-        console.warn("[Orchestrator] Failed to query LanceDB for historical context:", error);
-        // Continue without historical context
+          console.log(`[Orchestrator] 📊 Vector search results: ${historicalSessions.length} sessions, ${historicalActions.length} actions (before filtering)`);
+
+          // Filter results by semantic similarity threshold (0.7+) and time window (1 hour)
+          const ONE_HOUR_MS = 60 * 60 * 1000;
+          const now = Date.now();
+          
+          historicalSessions = historicalSessions.filter((s) => {
+            const timestamp = typeof s.timestamp === 'string' ? Date.parse(s.timestamp) : s.timestamp;
+            const isRecent = timestamp && (now - timestamp) < ONE_HOUR_MS;
+            const hasScore = (s as { _distance?: number })._distance !== undefined;
+            const isRelevant = !hasScore || ((s as unknown as { _distance: number })._distance >= 0.7); // Higher score = more similar
+            
+            if (!isRecent) {
+              console.log(`[Orchestrator] ❌ Filtered out old session (timestamp: ${s.timestamp})`);
+            } else if (hasScore && !isRelevant) {
+              console.log(`[Orchestrator] ❌ Filtered out low-relevance session (score: ${(s as { _distance?: number })._distance})`);
+            }
+            
+            return isRecent && isRelevant;
+          });
+          
+          historicalActions = historicalActions.filter((a) => {
+            const timestamp = typeof a.timestamp === 'string' ? Date.parse(a.timestamp) : a.timestamp;
+            const isRecent = timestamp && (now - timestamp) < ONE_HOUR_MS;
+            const hasScore = (a as { _distance?: number })._distance !== undefined;
+            const isRelevant = !hasScore || ((a as unknown as { _distance: number })._distance >= 0.7);
+            
+            if (!isRecent) {
+              console.log(`[Orchestrator] ❌ Filtered out old action (timestamp: ${a.timestamp})`);
+            } else if (hasScore && !isRelevant) {
+              console.log(`[Orchestrator] ❌ Filtered out low-relevance action (score: ${(a as { _distance?: number })._distance})`);
+            }
+            
+            return isRecent && isRelevant;
+          });
+
+          console.log(`[Orchestrator] ✅ After filtering: ${historicalSessions.length} relevant sessions, ${historicalActions.length} relevant actions`);
+          
+          if (historicalSessions.length === 0 && historicalActions.length === 0) {
+            console.log(`[Orchestrator] ⚠️  No relevant historical context found - proceeding with current context only`);
+          }
+        } catch (error) {
+          console.warn("[Orchestrator] Failed to query historical context:", error);
+          // Continue without historical context
+        }
+      } else {
+        console.log('[Orchestrator] No active file - skipping historical context search');
       }
 
       // Step 3: Merge contexts - build unified context for Gemini
-      const unifiedContext = this.buildUnifiedIdleContext(currentContext, historicalSessions, historicalActions);
+      // Historical context now includes ONLY relevant past work on same files/functions
+      const unifiedContext = await this.buildUnifiedIdleContext(currentContext, historicalSessions, historicalActions);
 
       // Step 4: Send to Gemini with idle-specific prompt (tests + summary + recommendations only, NO patches)
       if (!this.geminiClient.isReady()) {
@@ -820,51 +928,67 @@ export class Orchestrator extends EventEmitter {
   /**
    * Build unified context from current VSCode state + LanceDB historical data
    */
-  private buildUnifiedIdleContext(
+  private async buildUnifiedIdleContext(
     currentContext: CollectedContext,
-    historicalSessions: any[],
-    historicalActions: any[]
-  ): GeminiContext {
-    // Format historical sessions
-    const pastSessions = historicalSessions.map(s => ({
+    historicalSessions: Array<{ sessionId: string; summary: string; timestamp: string; projectName?: string; sessionData?: unknown }>,
+    _historicalActions: Array<{ actionId: string; description: string; timestamp: string; metadata?: unknown }>
+  ): Promise<GeminiContext> {
+    // Format historical sessions - ONLY if they exist and are relevant
+    const pastSessions = historicalSessions.length > 0 ? historicalSessions.map(s => ({
       summary: s.summary || "",
-      timestamp: s.timestamp || Date.now()
-    }));
+      timestamp: typeof s.timestamp === 'string' ? Date.parse(s.timestamp) : (s.timestamp || Date.now())
+    })) : undefined;
 
-    // Format historical actions
-    const pastActions = historicalActions.map(a => ({
-      description: a.description || "",
-      files: typeof a.files === 'string' ? JSON.parse(a.files) : (a.files || []),
-      timestamp: a.timestamp || Date.now()
-    }));
-
-    // Build git diff summary
+    // Build git diff summary with ACTUAL DIFF CONTENT, not just file counts
     let gitDiffSummary = "";
-    if (currentContext.git.uncommittedChanges && currentContext.git.uncommittedChanges.length > 0) {
-      gitDiffSummary = `Uncommitted changes in ${currentContext.git.uncommittedChanges.length} file(s)`;
-    } else if (currentContext.git.commits.length > 0) {
-      const recentCommit = currentContext.git.commits[0];
-      gitDiffSummary = `Recent commit: ${typeof recentCommit === 'string' ? recentCommit : (recentCommit.message || recentCommit.subject || '')}`;
+    
+    if (currentContext.files.activeFile && currentContext.workspace.rootPath) {
+      try {
+        // Get actual git diff for active file
+        const { stdout } = await execAsync(`git diff HEAD -- "${currentContext.files.activeFile}"`, {
+          cwd: currentContext.workspace.rootPath,
+          timeout: 2000,
+        });
+        
+        if (stdout && stdout.trim()) {
+          // Include actual diff lines (limited to first 50 lines to avoid prompt bloat)
+          const diffLines = stdout.trim().split('\n').slice(0, 50).join('\n');
+          gitDiffSummary = `Active file diff:\n${diffLines}`;
+        } else if (currentContext.git.uncommittedChanges && currentContext.git.uncommittedChanges.length > 0) {
+          gitDiffSummary = `Uncommitted files: ${currentContext.git.uncommittedChanges.slice(0, 5).join(", ")}`;
+        } else if (currentContext.git.commits.length > 0) {
+          const recentCommit = currentContext.git.commits[0];
+          const commitMsg = typeof recentCommit === 'string' ? recentCommit : (recentCommit.message || '');
+          gitDiffSummary = `Last commit: ${commitMsg}`;
+        }
+      } catch (error) {
+        console.warn('[Orchestrator] Failed to get git diff:', error);
+        // Fallback to simple file list
+        if (currentContext.git.uncommittedChanges && currentContext.git.uncommittedChanges.length > 0) {
+          gitDiffSummary = `Uncommitted files: ${currentContext.git.uncommittedChanges.slice(0, 5).join(", ")}`;
+        }
+      }
     }
-
-    // Build errors from file analysis
-    const errors: string[] = [];
-    // Could extract from currentContext files if needed
+    
+    if (!gitDiffSummary) {
+      gitDiffSummary = "No recent git activity";
+    }
+    
+    // REMOVED: recentlyEdited files - they're not being populated anymore and caused irrelevant context
 
     return {
       activeFile: currentContext.files.activeFile || null,
-      recentCommits: currentContext.git.commits.slice(0, 10).map((c: any) => 
-        typeof c === 'string' ? c : (c.message || c.subject || '')
+      recentCommits: currentContext.git.commits.slice(0, 3).map((c) => 
+        typeof c === 'string' ? c : (c.message || '')
       ),
-      recentErrors: errors,
+      recentErrors: [],
       gitDiffSummary,
-      editCount: currentContext.session.totalEdits,
-      relatedFiles: currentContext.files.openFiles.filter(f => f !== currentContext.files.activeFile),
-      relevantPastSessions: pastSessions,
-      // Additional context
-      projectStructure: undefined, // Could be added if needed
-      dependencies: undefined, // Could be added if needed
-      userIntent: `Idle improvements analysis for workspace at ${currentContext.workspace.rootPath || 'unknown'}`
+      editCount: currentContext.session.totalEdits || 0,
+      relatedFiles: currentContext.files.openFiles.filter(f => f !== currentContext.files.activeFile).slice(0, 5),
+      relevantPastSessions: pastSessions, // Now includes relevant historical context
+      projectStructure: undefined,
+      dependencies: undefined,
+      userIntent: `Analyzing current work in ${currentContext.files.activeFile || 'workspace'}`
     };
   }
 }

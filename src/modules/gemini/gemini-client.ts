@@ -162,12 +162,16 @@ export class GeminiClient implements GeminiModule {
     };
   }
 
-  async generateTests(functionCode: string): Promise<string> {
+  async generateTests(functionCode: string, language?: string, framework?: string): Promise<string> {
     if (!this.ready) {throw new Error("GeminiClient not initialized");}
 
     await this.rateLimit();
 
     if (this.modelName === "mock") {
+      // Generate mock test in the correct language
+      if (language === 'python') {
+        return `import pytest\n\ndef test_generated():\n    assert True`;
+      }
       return `
 describe('generatedTest', () => {
   it('should work', () => {
@@ -176,7 +180,7 @@ describe('generatedTest', () => {
 });`;
     }
 
-    const prompt = PromptTemplates.testGeneration(functionCode);
+    const prompt = PromptTemplates.testGeneration(functionCode, language || 'typescript', framework);
     
     try {
       if (!this.model) { throw new Error("Model not initialized"); }
