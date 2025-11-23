@@ -145,7 +145,7 @@ export interface IContextService extends EventEmitter {
  */
 export interface IAIService extends EventEmitter {
 	analyze(code: string, context: DeveloperContext): Promise<AIAnalysis>;
-	generateTests(code: string): Promise<string>;
+	generateTests(code: string, language?: string, framework?: string): Promise<string>;
 	fixError(code: string, error: string): Promise<CodeFix>;
 	explainCode(code: string): Promise<string>;
 	summarize(text: string): Promise<string>;

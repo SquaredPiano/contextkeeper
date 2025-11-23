@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { IdleDetector } from './idle-detector';
 import { IIdleService, IdleConfig } from './types';
-import { IStorageService } from '../../services/interfaces';
+import { IStorageService, IVoiceService } from '../../services/interfaces';
 import { EventRecord } from '../../services/storage/schema';
 import { IAIService } from '../../services/interfaces';
 import type { Orchestrator } from '../orchestrator/orchestrator';
@@ -24,14 +24,22 @@ export class IdleService implements IIdleService {
     private storage: IStorageService;
     private onIdleCallback?: () => Promise<void>;
     private aiService: IAIService | null = null;
+    private voiceService: IVoiceService | null = null;
     private workDoneWhileIdle: string[] = [];
     private isHandlingIdle: boolean = false; // Prevent duplicate handling
     private uiUpdateCallback?: (result: IdleImprovementsResult) => void; // NEW: Callback for UI updates
+    private lastIdleSummary: string = ''; // Store summary for TTS when user returns
 
-    constructor(storage: IStorageService, config: IdleConfig = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, aiService?: IAIService) {
+    constructor(
+        storage: IStorageService, 
+        config: IdleConfig = { thresholdMs: DEFAULT_IDLE_THRESHOLD_MS }, 
+        aiService?: IAIService,
+        voiceService?: IVoiceService
+    ) {
         this.detector = new IdleDetector(config);
         this.storage = storage;
         this.aiService = aiService || null;
+        this.voiceService = voiceService || null;
     }
 
     public async initialize(): Promise<void> {
@@ -92,7 +100,10 @@ export class IdleService implements IIdleService {
             return;
         }
 
-        console.log('[IdleService] User went idle! Starting idle improvements workflow...');
+        console.log('[IdleService] User went idle! Starting ONE-TIME idle improvements workflow...');
+        
+        // Pause the detector - we'll resume when user comes back
+        this.detector.stop();
         
         // Reset work tracker
         this.workDoneWhileIdle = [];
@@ -137,18 +148,48 @@ export class IdleService implements IIdleService {
         try {
             console.log('[IdleService] Starting idle improvements workflow...');
 
-            // Step 1: Request Autonomous to create/switch to auto/idle-improvements branch
+            // Step 1: Create a SINGLE timestamped branch for this idle session
             await autonomousAgent.ensureIdleBranch();
+            console.log('[IdleService] ✓ Branch created');
 
             // Step 2: Request Orchestrator to collect and analyze context
             const result = await orchestrator.analyzeForIdleImprovements();
+            console.log('[IdleService] ✓ Context analyzed');
 
-            // Step 3: Request Autonomous to store session/test artifacts in LanceDB
+            // Step 3: Request Autonomous to store session/test artifacts in LanceDB and track AI edits
+            // This also EXECUTES the generated tests
             if (result) {
-                await autonomousAgent.storeIdleResults(result, this.storage);
+                await autonomousAgent.storeIdleResults(result, this.storage, orchestrator);
+                console.log('[IdleService] ✓ Tests generated and executed');
             }
 
-            // Step 4: Display results to user
+            // Step 4: Run linting on active file and create CodeAction fix suggestions
+            const activeEditor = vscode.window.activeTextEditor;
+            if (activeEditor) {
+                console.log('[IdleService] Running lint analysis on active file...');
+                try {
+                    // Get VS Code diagnostics for active file
+                    const diagnostics = vscode.languages.getDiagnostics(activeEditor.document.uri);
+                    if (diagnostics.length > 0) {
+                        console.log(`[IdleService] Found ${diagnostics.length} lint issues`);
+                        
+                        // Request autonomous agent to create lint fix suggestions
+                        // This will use the CodeActionProvider to show Keep/Undo UI
+                        await autonomousAgent.createLintFixSuggestions(
+                            activeEditor.document.uri,
+                            diagnostics
+                        );
+                        console.log('[IdleService] ✓ Lint fixes created');
+                    } else {
+                        console.log('[IdleService] No lint issues found in active file');
+                    }
+                } catch (lintError) {
+                    console.warn('[IdleService] Lint fix creation failed:', lintError);
+                    // Continue anyway - don't fail the whole workflow
+                }
+            }
+
+            // Step 5: Display results to user
             if (result) {
                 this.displayIdleResults(result);
                 
@@ -171,6 +212,9 @@ export class IdleService implements IIdleService {
     }
 
     private displayIdleResults(result: IdleImprovementsResult): void {
+        // Store summary for TTS when user returns
+        this.lastIdleSummary = result.summary;
+        
         // Display friendly summary and test suggestions
         const message = [
             `📋 **Idle Analysis Complete**`,
@@ -206,7 +250,26 @@ export class IdleService implements IIdleService {
     }
 
     private handleActive(): void {
-        console.log('[IdleService] User active - returning from idle.');
+        console.log('[IdleService] User is BACK! Restarting idle detection.');
+        this.lastSessionTime = Date.now();
+        
+        // Restart the detector for the next idle period
+        if (this.isEnabled) {
+            this.detector.start();
+        }
+        
+        // Use TTS to speak the summary if available (for sponsor track demo)
+        if (this.voiceService && this.lastIdleSummary) {
+            try {
+                console.log('[IdleService] Speaking summary via ElevenLabs...');
+                this.voiceService.speak(
+                    `Welcome back! While you were away: ${this.lastIdleSummary}`,
+                    'casual'
+                );
+            } catch (error) {
+                console.warn('[IdleService] TTS failed:', error);
+            }
+        }
         
         // Show summary of work done while idle
         if (this.workDoneWhileIdle.length > 0) {
