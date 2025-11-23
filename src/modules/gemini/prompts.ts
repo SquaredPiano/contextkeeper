@@ -180,51 +180,41 @@ CRITICAL: In the "fixedCode" field, you MUST return the exact original code that
       : "None";
 
     return `
-You are an expert AI coding assistant analyzing a developer's codebase during an idle period.
+You MUST respond with ONLY valid JSON. No explanations, no markdown, no conversational text.
 
 CONTEXT:
 - Active File: ${context.activeFile || "Unknown"}
-- Related Open Files: ${relatedFilesStr}
-- Recent Git Commits:
-${commitsStr}
-- Edit Count: ${context.editCount} edits in this session
-- Git Diff Summary: ${context.gitDiffSummary || "No uncommitted changes"}
-- Relevant Past Sessions (from Vector DB):
-${pastSessionsStr}
-- User Intent: ${context.userIntent || "General code improvements"}
-
-IMPORTANT CONSTRAINTS:
-1. DO NOT generate code patches, diffs, or fixed code.
-2. DO NOT provide AST edits or code modifications.
-3. DO NOT suggest automatic fixes or apply changes.
-4. ONLY generate: test cases, human-readable summaries, and priority recommendations.
+- Related Files: ${relatedFilesStr}
+- Recent Commits: ${commitsStr}
+- Edit Count: ${context.editCount}
+- Git Diff: ${context.gitDiffSummary || "No changes"}
+- Past Sessions: ${pastSessionsStr}
+- User Intent: ${context.userIntent || "General improvements"}
 
 YOUR TASK:
-Based on the current codebase state and historical context:
-1. Generate comprehensive test cases for key files (as full test file content)
-2. Create a human-readable summary of the current work state and potential improvements
-3. Provide priority-based recommendations (high/medium/low) for improvements
+Analyze the codebase and respond with ONLY this JSON structure (no other text):
 
-Respond in valid JSON format ONLY:
 {
-  "summary": "Human-readable summary of the current codebase state, what the developer has been working on, and areas that could benefit from attention. This should be friendly and actionable.",
+  "summary": "Human-readable summary of current state and improvements",
   "tests": [
-    "// Full test file content as string (e.g., describe('...', () => { ... })",
-    "// Another test file content"
+    "// Complete test file content as string"
   ],
   "recommendations": [
     {
-      "priority": "high" | "medium" | "low",
-      "message": "Clear, actionable recommendation message (e.g., 'Consider adding error handling for edge cases in UserService')"
+      "priority": "high",
+      "message": "Actionable recommendation"
     }
   ]
 }
 
-REMEMBER:
-- Tests should be complete, runnable test files
-- Summary should be friendly and informative
-- Recommendations should be actionable but NOT include code fixes
-- NO patches, diffs, or code modifications
-    `.trim();
+CRITICAL RULES:
+1. Response must be ONLY valid JSON
+2. No markdown code blocks (no \`\`\`)
+3. No conversational text before or after JSON
+4. No code patches or fixes
+5. Tests should be complete test files as strings
+6. Recommendations must be actionable but not include code
+
+RESPOND WITH JSON ONLY:`.trim();
   }
 }

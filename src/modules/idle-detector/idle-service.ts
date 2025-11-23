@@ -127,8 +127,9 @@ export class IdleService implements IIdleService {
         try {
             console.log('[IdleService] Starting idle improvements workflow...');
 
-            // Step 1: Request Autonomous to create/switch to auto/idle-improvements branch
-            await autonomousAgent.ensureIdleBranch();
+            // DISABLED: Branch creation was too intrusive
+            // Step 1 (REMOVED): Request Autonomous to create/switch to auto/idle-improvements branch
+            // await autonomousAgent.ensureIdleBranch();
 
             // Step 2: Request Orchestrator to collect and analyze context
             const result = await orchestrator.analyzeForIdleImprovements();

@@ -18,6 +18,8 @@
     "verify-*.ts",
     "workers",
     "**/*.test.ts",
-    "src/modules/elevenlabs/test.ts"
+    "src/modules/elevenlabs/test.ts",
+    "tests/**/*",
+    "test-*.ts"
 	]
 }

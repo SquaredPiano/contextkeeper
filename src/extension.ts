@@ -321,19 +321,20 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       });
     } else {
-      // Fallback to legacy callback if orchestrator not available
+      // DISABLED: Legacy callback was too dangerous - auto-edited files
+      console.log('[Extension] Legacy autonomous agent callback DISABLED for safety');
+      
+      // Simple notification instead
       idleService.onIdle(async () => {
-        console.log('ContextKeeper: Idle detected, triggering legacy autonomous work...');
-        try {
-          await autonomousAgent.startSession('auto-lint');
-          
-          if (voiceService && voiceService.isEnabled()) {
-            voiceService.speak("I've completed autonomous work while you were away.", 'casual');
+        console.log('ContextKeeper: Idle detected (legacy mode disabled)');
+        vscode.window.showInformationMessage(
+          'You\'ve been idle. Enable autonomous mode in settings to get AI suggestions.',
+          'Enable'
+        ).then(selection => {
+          if (selection === 'Enable') {
+            vscode.commands.executeCommand('workbench.action.openSettings', 'copilot.autonomous.enabled');
           }
-        } catch (error) {
-          console.error('Autonomous task failed:', error);
-          vscode.window.showErrorMessage(`Autonomous work failed: ${error instanceof Error ? (error instanceof Error ? error.message : String(error)) : 'Unknown error'}`);
-        }
+        });
       });
     }
     

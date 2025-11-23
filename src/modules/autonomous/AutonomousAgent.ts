@@ -48,31 +48,23 @@ export class AutonomousAgent {
                             `${message}: ${results.slice(0, 3).map(r => r.message).join(', ')}${results.length > 3 ? '...' : ''}`
                         );
                         
-                        // Create a lint report comment in the file
-                        const lintReport = [
-                            '',
-                            '// ============ AUTONOMOUS LINT REPORT ============',
-                            `// Generated: ${new Date().toISOString()}`,
-                            `// Issues Found: ${results.length}`,
-                            ...results.map(r => `// - Line ${r.line}: ${r.message}`),
-                            '// =================================================',
-                            ''
-                        ].join('\n');
+                        // DISABLED: Auto-editing files is dangerous
+                        // Create a notification instead
+                        vscode.window.showWarningMessage(
+                            `Lint Report: ${results.length} issues found. Review manually.`,
+                            'Show Details'
+                        ).then(selection => {
+                            if (selection === 'Show Details') {
+                                const report = results.map(r => `Line ${r.line}: ${r.message}`).join('\n');
+                                vscode.window.showInformationMessage(report);
+                            }
+                        });
                         
-                        // Add lint report to top of file
-                        const edit = new vscode.WorkspaceEdit();
-                        edit.insert(document.uri, new vscode.Position(0, 0), lintReport);
-                        await vscode.workspace.applyEdit(edit);
-                        await document.save();
+                        console.log('[AutonomousAgent] Lint report generated (auto-edit DISABLED)');
                         
-                        // Commit the lint report
-                        const relativePath = vscode.workspace.asRelativePath(fileName);
-                        await this.gitService.commit(
-                            `chore: Add lint report for ${relativePath} (${results.length} issues)`,
-                            [fileName]
-                        );
-                        
-                        console.log('[AutonomousAgent] Lint report committed');
+                        // REMOVED: Automatic file modification and git commit
+                        // Original code was inserting comments into files and auto-committing
+                        // This was too aggressive and dangerous
                     } else {
                         console.log('[AutonomousAgent] No lint issues found');
                         vscode.window.showInformationMessage('✅ No lint issues found');
@@ -197,22 +189,20 @@ export class AutonomousAgent {
         try {
             const fix = await this.aiService.fixError(fullCode, `${error.message} at line ${range.start.line + 1}`);
 
-            if (fix && fix.fixedCode) {
-                // Apply the fix
-                const edit = new vscode.WorkspaceEdit();
-                const fullRange = new vscode.Range(
-                    document.positionAt(0),
-                    document.positionAt(fullCode.length)
-                );
-
-                edit.replace(document.uri, fullRange, fix.fixedCode);
-                await vscode.workspace.applyEdit(edit);
-                await document.save();
-
-                vscode.window.showInformationMessage(`Auto-Fix: Applied fix for "${error.message}"`);
-
-                // Commit the change
-                await this.gitService.commit(`Auto-Fix: ${error.message}`, [document.fileName]);
+            if (fix && fix.explanation) {
+                // SAFE: Only show explanation, don't auto-edit
+                vscode.window.showInformationMessage(
+                    `Fix suggestion for "${error.message}": ${fix.explanation}`,
+                    'Copy Suggestion'
+                ).then(selection => {
+                    if (selection === 'Copy Suggestion') {
+                        vscode.env.clipboard.writeText(fix.explanation || '');
+                        vscode.window.showInformationMessage('Suggestion copied to clipboard');
+                    }
+                });
+                
+                console.log('[AutonomousAgent] Auto-Fix DISABLED - showed suggestion instead');
+                // REMOVED: Automatic file replacement and git commit (too dangerous)
             }
         } catch (err) {
             console.error('Auto-Fix failed:', err);
@@ -230,7 +220,26 @@ export class AutonomousAgent {
         try {
             const testCode = await this.aiService.generateTests(code);
             
-            // Create a new test file
+            // SAFE: Show test code in output channel instead of creating file
+            const outputChannel = vscode.window.createOutputChannel('Generated Tests');
+            outputChannel.clear();
+            outputChannel.appendLine('// Generated test code:');
+            outputChannel.appendLine(testCode);
+            outputChannel.show();
+            
+            vscode.window.showInformationMessage(
+                'Test code generated. Review in Output panel.',
+                'Copy to Clipboard'
+            ).then(selection => {
+                if (selection === 'Copy to Clipboard') {
+                    vscode.env.clipboard.writeText(testCode);
+                }
+            });
+            
+            console.log('[AutonomousAgent] Test generation DISABLED - showed in output instead');
+            return; // Skip file creation below
+            
+            // REMOVED BELOW: Automatic test file creation
             // Assuming convention: filename.test.ts
             const testFilePath = filePath.replace(/\.ts$/, '.test.ts');
             const testUri = vscode.Uri.file(testFilePath);

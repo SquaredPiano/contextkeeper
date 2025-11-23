@@ -261,7 +261,13 @@ describe('generatedTest', () => {
 
     try {
       if (!this.model) { throw new Error("Model not initialized"); }
-      const result = await this.model.generateContent(prompt);
+      const result = await this.model.generateContent({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.7,
+          responseMimeType: "application/json"
+        }
+      });
       const response = await result.response;
       const text = response.text();
       
