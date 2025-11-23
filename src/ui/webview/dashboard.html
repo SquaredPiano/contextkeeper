@@ -174,6 +174,19 @@
 		</div>
 	</div>
 
+	<!-- Copilot Branches: list of branches created by autonomous agent -->
+	<div class="section" id="copilotBranchesSection">
+		<div class="title">Copilot Branches</div>
+		<div class="info-row" style="border-bottom:0; padding:0;">
+			<div style="display:flex; gap:12px; align-items:center; margin-top:6px;">
+				<div class="small-muted">Branches</div>
+				<div id="copilotBranchesCount">0</div>
+				<button id="refreshBranchesBtn" class="action-item" style="margin-left:auto; padding:4px 8px; font-size:11px;">Refresh</button>
+			</div>
+			<div id="copilotBranchesContainer" class="issue-list"><div class="small-muted">No copilot branches found.</div></div>
+		</div>
+	</div>
+
 	<script>
 		const vscode = acquireVsCodeApi();
 
@@ -280,6 +293,7 @@
 				case 'contextUpdate': updateContext(msg.payload); break;
 				case 'analysisComplete': updateAnalysis(msg.payload); break;
 				case 'extensionChanges': updateExtensionChanges(msg.payload); break;
+				case 'copilotBranches': updateCopilotBranches(msg.payload); break;
 				case 'idleImprovementsComplete': updateIdleImprovements(msg.payload); break;
 				case 'notificationsState':
 					try { localStorage.setItem(NOTIF_KEY, String(Boolean(msg.enabled))); } catch (e) {}
@@ -408,10 +422,82 @@
 			console.log('[Dashboard] Idle improvements displayed:', summary, 'Tests:', testsCount, 'Recommendations:', recommendations.length);
 		}
 
+		function updateCopilotBranches(branches){
+			const countEl = document.getElementById('copilotBranchesCount');
+			const cont = document.getElementById('copilotBranchesContainer');
+			if (!cont) return;
+			if (!branches || !Array.isArray(branches) || branches.length === 0){
+				if (countEl) countEl.textContent = '0';
+				cont.innerHTML = '<div class="small-muted">No copilot branches found.</div>';
+				return;
+			}
+			if (countEl) countEl.textContent = String(branches.length);
+			
+			// Use data attributes instead of onclick for security
+			// Escape branch names for HTML attributes
+			cont.innerHTML = branches.map((b) => {
+				const date = b.lastCommitDate ? (new Date(b.lastCommitDate)).toLocaleString() : '';
+				const current = b.isCurrent ? '<span style="color:var(--vscode-textLink-foreground); font-size:11px; margin-right:6px">[current]</span>' : '';
+				const commitMsg = b.lastCommit ? b.lastCommit.substring(0, 60) + (b.lastCommit.length > 60 ? '...' : '') : 'No commits';
+				// Escape HTML and quotes for data attribute
+				const branchNameEscaped = b.name.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+				return `<div class="issue-item branch-item" style="display:flex; flex-direction:column; gap:4px;">
+					<div style="display:flex; align-items:center; gap:8px;">
+						${current}
+						<strong style="font-size:12px;">${b.name}</strong>
+						<div style="display:flex; gap:4px; margin-left:auto;">
+							${!b.isCurrent ? `<button class="action-item branch-checkout" style="padding:2px 6px; font-size:10px;" data-branch="${branchNameEscaped}" type="button">Checkout</button>` : ''}
+							<button class="action-item branch-merge" style="padding:2px 6px; font-size:10px;" data-branch="${branchNameEscaped}" type="button">Merge</button>
+							<button class="action-item branch-delete" style="padding:2px 6px; font-size:10px;" data-branch="${branchNameEscaped}" type="button">Delete</button>
+						</div>
+					</div>
+					<div class="small-muted" style="font-size:11px;">${commitMsg}</div>
+					<div class="small-muted" style="font-size:10px;">${date}</div>
+				</div>`;
+			}).join('');
+		}
+
+		// Set up event delegation for branch buttons (once, on page load)
+		// Use document-level delegation so it works even when innerHTML is updated
+		document.addEventListener('click', (e) => {
+			const target = e.target;
+			if (!target || !target.classList) return;
+			
+			// Check if clicked element is a branch button or inside one
+			const button = target.closest('.branch-checkout, .branch-merge, .branch-delete');
+			if (!button) return;
+			
+			const branchName = button.getAttribute('data-branch');
+			if (!branchName) return;
+			
+			// Decode HTML entities
+			const decodedBranchName = branchName.replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+			
+			if (button.classList.contains('branch-checkout')) {
+				vscode.postMessage({ type: 'checkoutCopilotBranch', branchName: decodedBranchName });
+			} else if (button.classList.contains('branch-merge')) {
+				// Extension will handle confirmation
+				vscode.postMessage({ type: 'mergeCopilotBranch', branchName: decodedBranchName });
+			} else if (button.classList.contains('branch-delete')) {
+				// Extension will handle confirmation
+				vscode.postMessage({ type: 'deleteCopilotBranch', branchName: decodedBranchName });
+			}
+		});
+
+		// Refresh branches button
+		const refreshBranchesBtn = document.getElementById('refreshBranchesBtn');
+		if (refreshBranchesBtn) {
+			refreshBranchesBtn.addEventListener('click', () => {
+				vscode.postMessage({ type: 'requestCopilotBranches' });
+			});
+		}
+
 		// Request initial context and ensure sound is enabled by default via extension
 		vscode.postMessage({ type: 'requestContext' });
 		// Ask extension to ensure sound-on-open; extension will respond with 'elevenVoiceState'
 		vscode.postMessage({ type: 'ensureSoundOn' });
+		// Request copilot branches on load
+		vscode.postMessage({ type: 'requestCopilotBranches' });
 
 		// Initialize UI (if extension has not yet responded, fall back to true)
 		try { const stored = localStorage.getItem(SOUND_KEY); setSoundUI(stored === null ? true : stored === 'true'); } catch (e) { setSoundUI(true); }

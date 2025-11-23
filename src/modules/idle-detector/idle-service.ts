@@ -73,6 +73,16 @@ export class IdleService implements IIdleService {
         this.autonomousAgent = autonomousAgent;
     }
 
+    /**
+     * Update the idle threshold dynamically
+     */
+    public updateThreshold(ms: number): void {
+        if (this.detector) {
+            this.detector.setThreshold(ms);
+            console.log(`[IdleService] Updated threshold to ${ms}ms`);
+        }
+    }
+
     private async handleIdle(): Promise<void> {
         if (!this.isEnabled) { return; }
         
